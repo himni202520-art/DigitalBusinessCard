@@ -88,3 +88,9 @@
   "react-dom": "...",
   "react-easy-crop": "^5.5.6"
 }
+"dependencies": {
+  "react": "...",
+  "react-dom": "...",
+  "react-easy-crop": "^5.5.6",
+  "qrcode": "^1.5.4"
+}
