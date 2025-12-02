@@ -5,10 +5,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Upload, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react';
+import { Upload, Image as ImageIcon, ZoomIn, ZoomOut, Sparkles, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,7 @@ export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [layoutCarouselOpen, setLayoutCarouselOpen] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
@@ -134,6 +136,62 @@ export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
       setCrop({ x: 0, y: 0 });
       setZoom(1);
       setCroppedAreaPixels(null);
+    }
+  };
+
+  const handleGenerateAI = async () => {
+    if (!data.name || !data.jobTitle || !data.companyName) {
+      toast({
+        title: 'Missing Information',
+        description: 'Please fill in Name, Job Title, and Company Name first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setGeneratingAI(true);
+
+    try {
+      const { data: result, error } = await supabase.functions.invoke('generate-ai-summary', {
+        body: {
+          name: data.name,
+          jobTitle: data.jobTitle,
+          companyName: data.companyName,
+          website: data.website,
+          existingNotes: data.about,
+        },
+      });
+
+      if (error) {
+        let errorMessage = error.message;
+        if (error instanceof FunctionsHttpError) {
+          try {
+            const statusCode = error.context?.status ?? 500;
+            const textContent = await error.context?.text();
+            errorMessage = `[Code: ${statusCode}] ${textContent || error.message || 'Unknown error'}`;
+          } catch {
+            errorMessage = `${error.message || 'Failed to read response'}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      if (result?.summary) {
+        handleChange('about', result.summary);
+        toast({
+          title: 'AI Summary Generated',
+          description: 'You can edit it before saving.',
+        });
+      }
+    } catch (error: any) {
+      console.error('AI generation error:', error);
+      toast({
+        title: 'AI Generation Failed',
+        description: error.message || 'Failed to generate summary.',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingAI(false);
     }
   };
 
@@ -422,7 +480,29 @@ export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="about">About / Notes</Label>
+          <div className="flex items-center justify-between mb-1">
+            <Label htmlFor="about">About / Notes</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateAI}
+              disabled={generatingAI}
+              className="text-xs px-3 py-1.5 h-auto"
+            >
+              {generatingAI ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3 h-3 mr-1.5" />
+                  Generate from AI
+                </>
+              )}
+            </Button>
+          </div>
           <Textarea
             id="about"
             placeholder="Paste a short bio from LinkedIn or your website..."
