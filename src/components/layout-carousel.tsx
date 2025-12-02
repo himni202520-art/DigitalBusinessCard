@@ -114,9 +114,17 @@ export function LayoutCarousel({
                 className="snap-center shrink-0 w-[80%] max-w-sm flex flex-col items-center gap-3"
               >
                 {/* Static Card Preview - Tap to Select */}
-                <button
+                <div
                   onClick={() => handleSelectLayout(layout.id)}
-                  className="w-full rounded-3xl border-2 transition-all focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectLayout(layout.id);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className="w-full rounded-3xl border-2 transition-all focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 cursor-pointer"
                   style={{
                     borderColor: layout.id === selectedLayout ? 'rgb(168, 85, 247)' : 'rgb(226, 232, 240)',
                     boxShadow: layout.id === selectedLayout ? '0 0 0 4px rgba(168, 85, 247, 0.1)' : 'none',
@@ -133,7 +141,7 @@ export function LayoutCarousel({
                       />
                     </div>
                   </div>
-                </button>
+                </div>
 
                 {/* Layout Info */}
                 <div className="text-center space-y-1 px-2">
