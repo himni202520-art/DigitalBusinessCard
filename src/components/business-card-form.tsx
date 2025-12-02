@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Upload, Image as ImageIcon, CheckCircle2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Upload, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
@@ -14,10 +14,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import Cropper from 'react-easy-crop';
 import { Area, Point } from 'react-easy-crop';
+import { LayoutCarousel } from '@/components/layout-carousel';
 
 interface BusinessCardFormProps {
   data: BusinessCardData;
@@ -27,7 +27,7 @@ interface BusinessCardFormProps {
 export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [layoutDialogOpen, setLayoutDialogOpen] = useState(false);
+  const [layoutCarouselOpen, setLayoutCarouselOpen] = useState(false);
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
@@ -175,16 +175,20 @@ export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
     }
   };
 
-  const layouts = [
-    { id: 1, name: 'Full Photo Top', desc: 'Square photo at top, info below' },
-    { id: 2, name: 'Photo + Logo', desc: 'Square photo left, round logo right' },
-    { id: 3, name: 'Logo First', desc: 'Round logo top, photo under name' },
-    { id: 4, name: 'Badge Style', desc: 'Round photo with logo badge overlay' },
-    { id: 5, name: 'Minimal', desc: 'Logo only, no photo' },
-  ];
+
 
   return (
     <>
+      {/* Layout Carousel */}
+      {layoutCarouselOpen && (
+        <LayoutCarousel
+          currentData={data}
+          selectedLayout={data.layoutStyle || 1}
+          onSelectLayout={(layoutId) => handleChange('layoutStyle', layoutId)}
+          onClose={() => setLayoutCarouselOpen(false)}
+        />
+      )}
+
       {/* Crop Dialog */}
       <Dialog open={cropDialogOpen} onOpenChange={setCropDialogOpen}>
         <DialogContent className="max-w-2xl">
@@ -321,45 +325,15 @@ export function BusinessCardForm({ data, onChange }: BusinessCardFormProps) {
 
         {/* Layout Chooser */}
         <div className="space-y-2">
-          <Dialog open={layoutDialogOpen} onOpenChange={setLayoutDialogOpen}>
-            <DialogTrigger asChild>
-              <Button type="button" variant="outline" className="w-full">
-                <ImageIcon className="w-4 h-4 mr-2" />
-                Choose Layout (Current: Layout {data.layoutStyle || 1})
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Choose Card Layout</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-2">
-                {layouts.map((layout) => (
-                  <button
-                    key={layout.id}
-                    onClick={() => {
-                      handleChange('layoutStyle', layout.id);
-                      setLayoutDialogOpen(false);
-                    }}
-                    className={`w-full p-4 text-left rounded-lg border-2 transition-all ${
-                      data.layoutStyle === layout.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-semibold">{layout.name}</h4>
-                        <p className="text-sm text-muted-foreground">{layout.desc}</p>
-                      </div>
-                      {data.layoutStyle === layout.id && (
-                        <CheckCircle2 className="w-5 h-5 text-primary" />
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button 
+            type="button" 
+            variant="outline" 
+            className="w-full"
+            onClick={() => setLayoutCarouselOpen(true)}
+          >
+            <ImageIcon className="w-4 h-4 mr-2" />
+            Choose Layout (Current: Layout {data.layoutStyle || 1})
+          </Button>
         </div>
 
         <div className="space-y-2">
