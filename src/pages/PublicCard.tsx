@@ -211,28 +211,45 @@ export default function PublicCard() {
 
           {/* Signup CTA - Show after sharing details and if not logged in */}
           {showSignupCTA && !user && (
-            <Card className="p-8 bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20 animate-slide-up">
-              <div className="text-center space-y-4">
-                <div className="w-16 h-16 mx-auto gradient-bg rounded-full flex items-center justify-center">
-                  <CreditCard className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold mb-2 gradient-text">
-                    Create your own digital business card
+            <div className="space-y-4 animate-slide-up">
+              {/* Success Message */}
+              <Card className="p-6 bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
+                <div className="text-center space-y-2">
+                  <div className="w-12 h-12 mx-auto rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                    <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-green-900 dark:text-green-100">
+                    Your details have been shared successfully with {cardData.name}.
                   </h3>
-                  <p className="text-muted-foreground mb-6">
-                    Start building your professional network with your own digital card
-                  </p>
-                  <Button
-                    onClick={handleCreateCard}
-                    size="lg"
-                    className="gradient-bg"
-                  >
-                    Create My Card
-                  </Button>
                 </div>
-              </div>
-            </Card>
+              </Card>
+
+              {/* Create Your Card CTA */}
+              <Card className="p-8 bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 mx-auto gradient-bg rounded-full flex items-center justify-center">
+                    <CreditCard className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold mb-2 gradient-text">
+                      Create your own digital business card
+                    </h3>
+                    <p className="text-muted-foreground mb-6">
+                      Start building your professional network with your own digital card
+                    </p>
+                    <Button
+                      onClick={handleCreateCard}
+                      size="lg"
+                      className="w-full sm:w-auto gradient-bg text-base font-semibold py-6 px-8"
+                    >
+                      Create Your Digital Card
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
           )}
 
           {/* Footer Info */}

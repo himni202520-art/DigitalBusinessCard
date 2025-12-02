@@ -94,6 +94,31 @@ export function ViewerShareSection({ cardSlug, ownerUserId, ownerName, onShareSu
 
     setIsSaving(true);
     try {
+      // Normalize values for duplicate detection
+      const normalizedName = name.trim().toLowerCase();
+      const normalizedEmail = email.trim().toLowerCase();
+      // Remove all non-digits from phone numbers
+      const normalizedMobile = (mobile || whatsapp || '').replace(/[^0-9]/g, '');
+
+      // Check for existing contact with ALL THREE matching
+      let existingContact = null;
+      if (shareBasicInfo && normalizedName && normalizedEmail && normalizedMobile) {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('owner_user_id', ownerUserId)
+          .ilike('name', normalizedName)
+          .ilike('email', normalizedEmail);
+
+        if (!error && data && data.length > 0) {
+          // Check if mobile/whatsapp also matches (after normalization)
+          existingContact = data.find(contact => {
+            const existingMobile = (contact.mobile || contact.whatsapp || '').replace(/[^0-9]/g, '');
+            return existingMobile === normalizedMobile;
+          });
+        }
+      }
+
       const contactData = {
         owner_user_id: ownerUserId,
         viewer_user_id: user?.id || null,
@@ -106,11 +131,25 @@ export function ViewerShareSection({ cardSlug, ownerUserId, ownerName, onShareSu
         instagram_url: shareInstagram ? instagramUrl : null,
       };
 
-      const { error } = await supabase
-        .from('contacts')
-        .insert(contactData);
+      if (existingContact) {
+        // Update existing contact
+        const { error } = await supabase
+          .from('contacts')
+          .update({
+            ...contactData,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingContact.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // Insert new contact
+        const { error } = await supabase
+          .from('contacts')
+          .insert(contactData);
+
+        if (error) throw error;
+      }
 
       setIsSuccess(true);
       toast({
@@ -121,13 +160,7 @@ export function ViewerShareSection({ cardSlug, ownerUserId, ownerName, onShareSu
       // Notify parent component
       onShareSuccess?.();
 
-      // Reset form after 3 seconds
-      setTimeout(() => {
-        setShareBasicInfo(false);
-        setShareLinkedIn(false);
-        setShareInstagram(false);
-        setIsSuccess(false);
-      }, 3000);
+      // Keep success message visible (don't auto-reset)
     } catch (error: any) {
       console.error('Error sharing details:', error);
       toast({
@@ -135,7 +168,6 @@ export function ViewerShareSection({ cardSlug, ownerUserId, ownerName, onShareSu
         description: error.message || 'Failed to share your details.',
         variant: 'destructive',
       });
-    } finally {
       setIsSaving(false);
     }
   };

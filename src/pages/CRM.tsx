@@ -140,7 +140,7 @@ export default function CRM() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto space-y-4">
+        <div className="max-w-4xl mx-auto">
           {contacts.length === 0 ? (
             <Card className="p-12">
               <div className="text-center space-y-4">
@@ -160,83 +160,168 @@ export default function CRM() {
               </div>
             </Card>
           ) : (
-            contacts.map((contact) => (
-              <Card key={contact.id} className="p-6 hover:shadow-lg transition-shadow">
-                <div className="flex items-start justify-between gap-4">
-                  {/* Contact Info */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-bold mb-2">{contact.name}</h3>
-                    <div className="space-y-1 text-sm text-muted-foreground">
-                      {contact.email && (
-                        <p className="truncate">
-                          <Mail className="w-3 h-3 inline mr-1" />
+            <div className="w-full space-y-3">
+              {contacts.map((contact) => (
+                <Card key={contact.id} className="hover:shadow-lg transition-shadow">
+                  {/* Mobile Layout - Stacked Card */}
+                  <div className="block md:hidden p-4 space-y-2">
+                    {/* Name */}
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                      {contact.name}
+                    </h3>
+                    
+                    {/* Email */}
+                    {contact.email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                        <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
                           {contact.email}
                         </p>
+                      </div>
+                    )}
+                    
+                    {/* Phone + WhatsApp Row */}
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      {/* Phone */}
+                      {contact.mobile ? (
+                        <button
+                          onClick={() => handleCall(contact.mobile)}
+                          className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span className="truncate">{contact.mobile}</span>
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">No phone</span>
                       )}
-                      {contact.mobile && (
-                        <p>
-                          <Phone className="w-3 h-3 inline mr-1" />
-                          {contact.mobile}
-                        </p>
+                      
+                      {/* WhatsApp Button */}
+                      {contact.whatsapp && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleWhatsApp(contact.whatsapp)}
+                          className="h-7 px-3 text-xs border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 mr-1" />
+                          WhatsApp
+                        </Button>
                       )}
+                    </div>
+                    
+                    {/* Action Buttons Row */}
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                      {contact.email && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEmail(contact.email)}
+                          className="h-7 px-3 text-xs"
+                        >
+                          <Mail className="w-3.5 h-3.5 mr-1" />
+                          Email
+                        </Button>
+                      )}
+                      {contact.linkedin_url && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleLinkedIn(contact.linkedin_url)}
+                          className="h-7 px-3 text-xs"
+                        >
+                          <Linkedin className="w-3.5 h-3.5 mr-1" />
+                          LinkedIn
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveContact(contact)}
+                        className="h-7 px-3 text-xs gradient-bg ml-auto"
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" />
+                        Save
+                      </Button>
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex flex-wrap gap-2 items-start">
-                    {contact.mobile && (
+                  {/* Desktop/Tablet Layout - Grid */}
+                  <div className="hidden md:grid md:grid-cols-[minmax(160px,2fr)_minmax(160px,2fr)_minmax(120px,1.5fr)_minmax(140px,1fr)] gap-3 p-5 items-center">
+                    {/* Name Column */}
+                    <div>
+                      <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {contact.name}
+                      </h3>
+                    </div>
+                    
+                    {/* Email Column */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      {contact.email ? (
+                        <>
+                          <Mail className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                          <button
+                            onClick={() => handleEmail(contact.email)}
+                            className="text-sm text-slate-600 dark:text-slate-400 hover:text-primary transition-colors truncate"
+                          >
+                            {contact.email}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-sm text-slate-400">-</span>
+                      )}
+                    </div>
+                    
+                    {/* Phone Column */}
+                    <div className="flex items-center gap-2">
+                      {contact.mobile ? (
+                        <>
+                          <Phone className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                          <button
+                            onClick={() => handleCall(contact.mobile)}
+                            className="text-sm text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                          >
+                            {contact.mobile}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-sm text-slate-400">-</span>
+                      )}
+                    </div>
+                    
+                    {/* Actions Column */}
+                    <div className="flex items-center gap-2 justify-end">
+                      {contact.whatsapp && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleWhatsApp(contact.whatsapp)}
+                          title="WhatsApp"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                        </Button>
+                      )}
+                      {contact.linkedin_url && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleLinkedIn(contact.linkedin_url)}
+                          title="LinkedIn"
+                        >
+                          <Linkedin className="w-4 h-4" />
+                        </Button>
+                      )}
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => handleCall(contact.mobile)}
-                        title="Call"
+                        onClick={() => handleSaveContact(contact)}
+                        className="gradient-bg"
+                        title="Save Contact"
                       >
-                        <Phone className="w-4 h-4" />
+                        <Download className="w-4 h-4" />
                       </Button>
-                    )}
-                    {contact.whatsapp && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleWhatsApp(contact.whatsapp)}
-                        title="WhatsApp"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                      </Button>
-                    )}
-                    {contact.email && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleEmail(contact.email)}
-                        title="Email"
-                      >
-                        <Mail className="w-4 h-4" />
-                      </Button>
-                    )}
-                    {contact.linkedin_url && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleLinkedIn(contact.linkedin_url)}
-                        title="LinkedIn"
-                      >
-                        <Linkedin className="w-4 h-4" />
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => handleSaveContact(contact)}
-                      className="gradient-bg"
-                    >
-                      <Download className="w-4 h-4 mr-1" />
-                      Save
-                    </Button>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            ))
+                </Card>
+              ))}
+            </div>
           )}
         </div>
       </main>
