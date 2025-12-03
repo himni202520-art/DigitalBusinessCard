@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -35,9 +36,15 @@ import {
   CreditCard,
   Plus,
   Tag,
-  Filter,
   Edit,
+  Mic,
+  Square,
+  Send,
+  FileText,
+  Trash2,
+  Star,
 } from 'lucide-react';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 interface Contact {
   id: string;
@@ -48,6 +55,14 @@ interface Contact {
   whatsapp?: string;
   created_at: string;
   tags?: string[];
+  meeting_notes?: string;
+}
+
+interface WhatsAppTemplate {
+  id: string;
+  name: string;
+  body_template: string;
+  is_active: boolean;
 }
 
 // Predefined tag categories
@@ -76,6 +91,27 @@ export default function CRM() {
   // Filters
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
+
+  // Recording states
+  const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isProcessingMoM, setIsProcessingMoM] = useState(false);
+  const [momModalOpen, setMomModalOpen] = useState(false);
+  const [momText, setMomText] = useState('');
+  const [momContactId, setMomContactId] = useState<string>('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef<string>('');
+
+  // Template states
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateBody, setNewTemplateBody] = useState('');
   
   const { user, loading } = useAuth();
   const { toast } = useToast();
@@ -116,6 +152,25 @@ export default function CRM() {
     loadContacts();
   }, [user, toast]);
 
+  // Load WhatsApp templates
+  useEffect(() => {
+    if (!user) return;
+
+    const loadTemplates = async () => {
+      const { data, error } = await supabase
+        .from('whatsapp_templates')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setTemplates(data);
+      }
+    };
+
+    loadTemplates();
+  }, [user]);
+
   // Apply filters
   useEffect(() => {
     let filtered = [...contacts];
@@ -124,7 +179,6 @@ export default function CRM() {
     if (activeTagFilter !== 'All') {
       filtered = filtered.filter(contact => {
         const tags = contact.tags || [];
-        // For event tags, check if any tag starts with "Event:"
         if (activeTagFilter.startsWith('Event:')) {
           return tags.some(tag => tag === activeTagFilter);
         }
@@ -161,7 +215,6 @@ export default function CRM() {
     setFilteredContacts(filtered);
   }, [contacts, activeTagFilter, activeDateFilter]);
 
-  // Extract unique event tags from all contacts
   const getEventTags = () => {
     const eventTags = new Set<string>();
     contacts.forEach(contact => {
@@ -175,7 +228,6 @@ export default function CRM() {
     return Array.from(eventTags);
   };
 
-  // Get all unique tags for filter chips
   const getAllFilterTags = () => {
     const allTags = [
       ...TEMPERATURE_TAGS,
@@ -196,10 +248,28 @@ export default function CRM() {
     window.location.href = `mailto:${email}`;
   };
 
-  const handleWhatsApp = (whatsapp?: string) => {
-    if (!whatsapp) return;
-    const cleanNumber = whatsapp.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${cleanNumber}`, '_blank');
+  const handleWhatsApp = async (contact: Contact) => {
+    if (!contact.whatsapp) return;
+
+    const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
+    
+    // Get active template
+    const activeTemplate = templates.find(t => t.is_active);
+    let message = '';
+
+    if (activeTemplate) {
+      // Replace placeholders
+      message = activeTemplate.body_template
+        .replace(/\{\{name\}\}/g, contact.name || '')
+        .replace(/\{\{company\}\}/g, contact.email?.split('@')[1] || '')
+        .replace(/\{\{my_name\}\}/g, user?.username || '');
+    } else {
+      // Default message
+      message = `Hi ${contact.name}, this is ${user?.username}. Saving your contact from my digital business card.`;
+    }
+
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
   };
 
   const handleLinkedIn = (linkedin?: string) => {
@@ -226,7 +296,6 @@ export default function CRM() {
     setSelectedTags(contact.tags || []);
     setCustomTag('');
     
-    // Check if contact has event tag
     const existingEventTag = (contact.tags || []).find(tag => tag.startsWith('Event:'));
     if (existingEventTag) {
       setEventTagEnabled(true);
@@ -252,22 +321,17 @@ export default function CRM() {
 
     let finalTags = [...selectedTags];
 
-    // Add custom tag if provided
     if (customTag.trim()) {
       finalTags.push(customTag.trim());
     }
 
-    // Add event tag if enabled
     if (eventTagEnabled && eventName.trim()) {
-      // Remove any existing event tags
       finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
       finalTags.push(`Event: ${eventName.trim()}`);
     } else {
-      // Remove event tags if disabled
       finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     }
 
-    // Update contact
     const { error } = await supabase
       .from('contacts')
       .update({ 
@@ -277,6 +341,7 @@ export default function CRM() {
       .eq('id', editingContact.id);
 
     if (error) {
+      console.error('Error updating tags:', error);
       toast({
         title: 'Update Failed',
         description: 'Failed to update tags.',
@@ -285,7 +350,6 @@ export default function CRM() {
       return;
     }
 
-    // Update local state
     setContacts(contacts.map(c => 
       c.id === editingContact.id ? { ...c, tags: finalTags } : c
     ));
@@ -300,7 +364,6 @@ export default function CRM() {
   };
 
   const openBulkEdit = () => {
-    // Pre-select all filtered contacts
     const allIds = new Set(filteredContacts.map(c => c.id));
     setBulkSelectedContacts(allIds);
     setBulkTags([]);
@@ -340,52 +403,385 @@ export default function CRM() {
 
     let tagsToAdd = [...bulkTags];
 
-    // Add custom tag
     if (bulkCustomTag.trim()) {
       tagsToAdd.push(bulkCustomTag.trim());
     }
 
-    // Add event tag
     if (bulkEventEnabled && bulkEventName.trim()) {
       tagsToAdd.push(`Event: ${bulkEventName.trim()}`);
     }
 
-    // Update all selected contacts
-    const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
-      const contact = contacts.find(c => c.id === contactId);
-      if (!contact) return;
+    try {
+      const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
+        const contact = contacts.find(c => c.id === contactId);
+        if (!contact) return;
 
-      const existingTags = contact.tags || [];
-      const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
+        const existingTags = contact.tags || [];
+        const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
 
-      return supabase
+        return supabase
+          .from('contacts')
+          .update({ 
+            tags: mergedTags,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', contactId);
+      });
+
+      await Promise.all(updates);
+
+      // Reload contacts
+      const { data } = await supabase
         .from('contacts')
-        .update({ 
-          tags: mergedTags,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', contactId);
-    });
+        .select('*')
+        .eq('owner_user_id', user!.id)
+        .order('created_at', { ascending: false });
 
-    await Promise.all(updates);
+      if (data) {
+        setContacts(data);
+      }
 
-    // Reload contacts
-    const { data } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('owner_user_id', user!.id)
-      .order('created_at', { ascending: false });
+      toast({
+        title: 'Bulk Update Complete',
+        description: `Updated tags for ${bulkSelectedContacts.size} contact(s).`,
+      });
 
-    if (data) {
-      setContacts(data);
+      setBulkEditModalOpen(false);
+    } catch (error) {
+      console.error('Bulk update error:', error);
+      toast({
+        title: 'Bulk Update Failed',
+        description: 'Failed to update tags for some contacts.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Meeting Recording Functions
+  const startRecording = async (contact: Contact) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      transcriptRef.current = '';
+
+      // Initialize Speech Recognition
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              transcriptRef.current += event.results[i][0].transcript + ' ';
+            }
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      }
+
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingContact(contact);
+      setRecordingTime(0);
+
+      // Start timer
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      toast({
+        title: 'Recording Failed',
+        description: 'Failed to access microphone. Please check permissions.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!mediaRecorderRef.current || !recordingContact) return;
+
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
     }
 
-    toast({
-      title: 'Bulk Update Complete',
-      description: `Updated tags for ${bulkSelectedContacts.size} contact(s).`,
-    });
+    // Stop speech recognition
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
 
-    setBulkEditModalOpen(false);
+    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+
+    // Wait for final chunks
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const transcript = transcriptRef.current.trim();
+
+    if (!transcript) {
+      toast({
+        title: 'No Speech Detected',
+        description: 'Could not transcribe audio. Please try again.',
+        variant: 'destructive',
+      });
+      setRecordingContact(null);
+      return;
+    }
+
+    generateMoM(transcript, recordingContact);
+  };
+
+  const generateMoM = async (transcript: string, contact: Contact) => {
+    setIsProcessingMoM(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-mom', {
+        body: {
+          transcript,
+          contactName: contact.name,
+          contactCompany: contact.email?.split('@')[1] || '',
+        },
+      });
+
+      if (error) {
+        let errorMessage = error.message;
+        if (error instanceof FunctionsHttpError) {
+          try {
+            const statusCode = error.context?.status ?? 500;
+            const textContent = await error.context?.text();
+            errorMessage = `[Code: ${statusCode}] ${textContent || error.message || 'Unknown error'}`;
+          } catch {
+            errorMessage = `${error.message || 'Failed to read response'}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      if (data?.mom_text) {
+        setMomText(data.mom_text);
+        setMomContactId(contact.id);
+        setMomModalOpen(true);
+      }
+    } catch (error: any) {
+      console.error('MoM generation error:', error);
+      toast({
+        title: 'MoM Generation Failed',
+        description: error.message || 'Failed to generate Minutes of Meeting.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessingMoM(false);
+      setRecordingContact(null);
+    }
+  };
+
+  const saveMoMToCRM = async () => {
+    if (!momContactId || !momText) return;
+
+    const { error } = await supabase
+      .from('contacts')
+      .update({ 
+        meeting_notes: momText,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', momContactId);
+
+    if (error) {
+      toast({
+        title: 'Save Failed',
+        description: 'Failed to save meeting notes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setContacts(contacts.map(c => 
+      c.id === momContactId ? { ...c, meeting_notes: momText } : c
+    ));
+
+    toast({
+      title: 'Meeting Notes Saved',
+      description: 'Meeting notes have been saved to CRM.',
+    });
+  };
+
+  const shareMoMViaWhatsApp = () => {
+    const contact = contacts.find(c => c.id === momContactId);
+    if (!contact?.whatsapp) {
+      toast({
+        title: 'No WhatsApp Number',
+        description: 'This contact does not have a WhatsApp number.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
+    const encodedMessage = encodeURIComponent(momText);
+    window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
+  };
+
+  const shareMoMViaEmail = () => {
+    const contact = contacts.find(c => c.id === momContactId);
+    if (!contact?.email) {
+      toast({
+        title: 'No Email Address',
+        description: 'This contact does not have an email address.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const subject = encodeURIComponent('Minutes of Meeting');
+    const body = encodeURIComponent(momText);
+    window.location.href = `mailto:${contact.email}?subject=${subject}&body=${body}`;
+  };
+
+  const shareMoMViaBoth = () => {
+    shareMoMViaWhatsApp();
+    shareMoMViaEmail();
+  };
+
+  // Template Management
+  const openTemplateManager = () => {
+    setTemplateModalOpen(true);
+  };
+
+  const saveTemplate = async () => {
+    if (!newTemplateName.trim() || !newTemplateBody.trim()) {
+      toast({
+        title: 'Missing Information',
+        description: 'Please fill in template name and body.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      if (editingTemplate) {
+        const { error } = await supabase
+          .from('whatsapp_templates')
+          .update({
+            name: newTemplateName,
+            body_template: newTemplateBody,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingTemplate.id);
+
+        if (error) throw error;
+
+        setTemplates(templates.map(t => 
+          t.id === editingTemplate.id 
+            ? { ...t, name: newTemplateName, body_template: newTemplateBody }
+            : t
+        ));
+
+        toast({
+          title: 'Template Updated',
+          description: 'WhatsApp template has been updated.',
+        });
+      } else {
+        const { data, error } = await supabase
+          .from('whatsapp_templates')
+          .insert({
+            user_id: user!.id,
+            name: newTemplateName,
+            body_template: newTemplateBody,
+            is_active: templates.length === 0, // First template is active by default
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setTemplates([...templates, data]);
+
+        toast({
+          title: 'Template Created',
+          description: 'WhatsApp template has been created.',
+        });
+      }
+
+      setNewTemplateName('');
+      setNewTemplateBody('');
+      setEditingTemplate(null);
+    } catch (error: any) {
+      console.error('Template save error:', error);
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save template.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const setActiveTemplate = async (templateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('whatsapp_templates')
+        .update({ is_active: true })
+        .eq('id', templateId);
+
+      if (error) throw error;
+
+      setTemplates(templates.map(t => ({
+        ...t,
+        is_active: t.id === templateId,
+      })));
+
+      toast({
+        title: 'Active Template Set',
+        description: 'This template will be used for WhatsApp messages.',
+      });
+    } catch (error: any) {
+      console.error('Set active template error:', error);
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to set active template.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const deleteTemplate = async (templateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('whatsapp_templates')
+        .delete()
+        .eq('id', templateId);
+
+      if (error) throw error;
+
+      setTemplates(templates.filter(t => t.id !== templateId));
+
+      toast({
+        title: 'Template Deleted',
+        description: 'WhatsApp template has been deleted.',
+      });
+    } catch (error: any) {
+      console.error('Delete template error:', error);
+      toast({
+        title: 'Delete Failed',
+        description: error.message || 'Failed to delete template.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const formatDateTime = (dateString: string) => {
@@ -399,6 +795,12 @@ export default function CRM() {
       hour12: true,
     };
     return date.toLocaleString('en-US', options);
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const getTagColor = (tag: string) => {
@@ -475,7 +877,18 @@ export default function CRM() {
               <Card className="p-4 mb-6 space-y-4">
                 {/* Tag Filters */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium text-slate-600">Filter by Tag</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium text-slate-600">Filter by Tag</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={openTemplateManager}
+                      className="h-7 text-xs"
+                    >
+                      <MessageCircle className="w-3 h-3 mr-1" />
+                      Templates
+                    </Button>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge
                       variant={activeTagFilter === 'All' ? 'default' : 'outline'}
@@ -532,9 +945,8 @@ export default function CRM() {
               <div className="w-full space-y-3">
                 {filteredContacts.map((contact) => (
                   <Card key={contact.id} className="hover:shadow-lg transition-shadow">
-                    {/* Mobile Layout - Stacked Card */}
+                    {/* Mobile Layout */}
                     <div className="block md:hidden p-4 space-y-2">
-                      {/* Tags Row */}
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex flex-wrap gap-1">
                           {(contact.tags || []).map((tag, idx) => (
@@ -557,12 +969,10 @@ export default function CRM() {
                         </Button>
                       </div>
 
-                      {/* Name */}
                       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                         {contact.name}
                       </h3>
                       
-                      {/* Email */}
                       {contact.email && (
                         <div className="flex items-center gap-2">
                           <Mail className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
@@ -572,7 +982,6 @@ export default function CRM() {
                         </div>
                       )}
                       
-                      {/* Phone + WhatsApp Row */}
                       <div className="flex items-center justify-between gap-2 mt-2">
                         {contact.mobile ? (
                           <button
@@ -590,7 +999,7 @@ export default function CRM() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleWhatsApp(contact.whatsapp)}
+                            onClick={() => handleWhatsApp(contact)}
                             className="h-7 px-3 text-xs border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
                           >
                             <MessageCircle className="w-3.5 h-3.5 mr-1" />
@@ -599,8 +1008,41 @@ export default function CRM() {
                         )}
                       </div>
                       
-                      {/* Action Buttons Row */}
                       <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                        {/* Recording Button */}
+                        {recordingContact?.id === contact.id ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={stopRecording}
+                            disabled={isProcessingMoM}
+                            className="h-7 px-3 text-xs border-red-500 text-red-600"
+                          >
+                            {isProcessingMoM ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              <>
+                                <Square className="w-3.5 h-3.5 mr-1" />
+                                Stop & Generate MoM ({formatRecordingTime(recordingTime)})
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => startRecording(contact)}
+                            disabled={isRecording || isProcessingMoM}
+                            className="h-7 px-3 text-xs"
+                          >
+                            <Mic className="w-3.5 h-3.5 mr-1" />
+                            Record
+                          </Button>
+                        )}
+
                         {contact.email && (
                           <Button
                             size="sm"
@@ -633,15 +1075,13 @@ export default function CRM() {
                         </Button>
                       </div>
 
-                      {/* Created Date */}
                       <p className="text-[10px] text-slate-400 mt-1">
                         Added on {formatDateTime(contact.created_at)}
                       </p>
                     </div>
 
-                    {/* Desktop/Tablet Layout - Grid */}
-                    <div className="hidden md:grid md:grid-cols-[minmax(160px,2fr)_minmax(160px,2fr)_minmax(120px,1.5fr)_minmax(140px,1fr)] gap-3 p-5 items-center">
-                      {/* Name + Tags Column */}
+                    {/* Desktop Layout */}
+                    <div className="hidden md:grid md:grid-cols-[minmax(160px,2fr)_minmax(160px,2fr)_minmax(120px,1.5fr)_minmax(180px,1.5fr)] gap-3 p-5 items-center">
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">
@@ -672,7 +1112,6 @@ export default function CRM() {
                         </p>
                       </div>
                       
-                      {/* Email Column */}
                       <div className="flex items-center gap-2 min-w-0">
                         {contact.email ? (
                           <>
@@ -689,7 +1128,6 @@ export default function CRM() {
                         )}
                       </div>
                       
-                      {/* Phone Column */}
                       <div className="flex items-center gap-2">
                         {contact.mobile ? (
                           <>
@@ -706,13 +1144,44 @@ export default function CRM() {
                         )}
                       </div>
                       
-                      {/* Actions Column */}
                       <div className="flex items-center gap-2 justify-end">
+                        {recordingContact?.id === contact.id ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={stopRecording}
+                            disabled={isProcessingMoM}
+                            className="border-red-500 text-red-600"
+                          >
+                            {isProcessingMoM ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              <>
+                                <Square className="w-4 h-4 mr-1" />
+                                Stop ({formatRecordingTime(recordingTime)})
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => startRecording(contact)}
+                            disabled={isRecording || isProcessingMoM}
+                            title="Record Meeting"
+                          >
+                            <Mic className="w-4 h-4" />
+                          </Button>
+                        )}
+
                         {contact.whatsapp && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleWhatsApp(contact.whatsapp)}
+                            onClick={() => handleWhatsApp(contact)}
                             title="WhatsApp"
                           >
                             <MessageCircle className="w-4 h-4" />
@@ -753,7 +1222,6 @@ export default function CRM() {
             <DialogTitle>Edit Tags - {editingContact?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
-            {/* Temperature Tags */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Lead Temperature</Label>
               <div className="flex flex-wrap gap-2">
@@ -770,7 +1238,6 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Relationship Tags */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Relationship</Label>
               <div className="flex flex-wrap gap-2">
@@ -787,7 +1254,6 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Source Tags */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Source</Label>
               <div className="flex flex-wrap gap-2">
@@ -804,7 +1270,6 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Status Tags */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Status</Label>
               <div className="flex flex-wrap gap-2">
@@ -821,7 +1286,6 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Event Tag */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -843,7 +1307,6 @@ export default function CRM() {
               )}
             </div>
 
-            {/* Custom Tag */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Custom Tag</Label>
               <Input
@@ -853,7 +1316,6 @@ export default function CRM() {
               />
             </div>
 
-            {/* Save Button */}
             <Button onClick={handleSaveTags} className="w-full gradient-bg">
               <Tag className="w-4 h-4 mr-2" />
               Save Tags
@@ -869,12 +1331,10 @@ export default function CRM() {
             <DialogTitle>Bulk Edit Tags</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
-            {/* Selected Contacts Count */}
             <p className="text-sm text-slate-600">
               {bulkSelectedContacts.size} contact{bulkSelectedContacts.size !== 1 ? 's' : ''} selected
             </p>
 
-            {/* Contact Selection List */}
             <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-3">
               {filteredContacts.map(contact => (
                 <div key={contact.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded">
@@ -897,9 +1357,7 @@ export default function CRM() {
               ))}
             </div>
 
-            {/* Tag Selection */}
             <div className="space-y-4">
-              {/* Temperature */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Lead Temperature</Label>
                 <div className="flex flex-wrap gap-2">
@@ -916,7 +1374,6 @@ export default function CRM() {
                 </div>
               </div>
 
-              {/* Relationship */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Relationship</Label>
                 <div className="flex flex-wrap gap-2">
@@ -933,7 +1390,6 @@ export default function CRM() {
                 </div>
               </div>
 
-              {/* Source */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Source</Label>
                 <div className="flex flex-wrap gap-2">
@@ -950,7 +1406,6 @@ export default function CRM() {
                 </div>
               </div>
 
-              {/* Status */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Status</Label>
                 <div className="flex flex-wrap gap-2">
@@ -967,7 +1422,6 @@ export default function CRM() {
                 </div>
               </div>
 
-              {/* Event Tag */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -989,7 +1443,6 @@ export default function CRM() {
                 )}
               </div>
 
-              {/* Custom Tag */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Custom Tag</Label>
                 <Input
@@ -1000,10 +1453,180 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Apply Button */}
             <Button onClick={handleBulkApply} className="w-full gradient-bg">
               Apply to Selected Contacts
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Minutes of Meeting Modal */}
+      <Dialog open={momModalOpen} onOpenChange={setMomModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Minutes of Meeting - {contacts.find(c => c.id === momContactId)?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              value={momText}
+              onChange={(e) => setMomText(e.target.value)}
+              rows={12}
+              className="font-mono text-sm"
+            />
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Button
+                variant="outline"
+                onClick={shareMoMViaWhatsApp}
+                className="w-full"
+              >
+                <MessageCircle className="w-4 h-4 mr-2" />
+                Send via WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareMoMViaEmail}
+                className="w-full"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Send via Email
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareMoMViaBoth}
+                className="w-full"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Send via Both
+              </Button>
+            </div>
+
+            <Button
+              onClick={saveMoMToCRM}
+              className="w-full gradient-bg"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Save to CRM
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* WhatsApp Template Manager Modal */}
+      <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>WhatsApp Message Templates</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            {/* Template List */}
+            {templates.length > 0 && (
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Saved Templates</Label>
+                {templates.map(template => (
+                  <Card key={template.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-sm">{template.name}</h4>
+                          {template.is_active && (
+                            <Badge variant="default" className="text-xs">Active</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                          {template.body_template}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {!template.is_active && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setActiveTemplate(template.id)}
+                            title="Set as active"
+                          >
+                            <Star className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingTemplate(template);
+                            setNewTemplateName(template.name);
+                            setNewTemplateBody(template.body_template);
+                          }}
+                          title="Edit"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => deleteTemplate(template.id)}
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {/* New/Edit Template Form */}
+            <div className="space-y-4 pt-4 border-t">
+              <Label className="text-sm font-medium">
+                {editingTemplate ? 'Edit Template' : 'Create New Template'}
+              </Label>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="template-name">Template Name</Label>
+                  <Input
+                    id="template-name"
+                    placeholder="e.g., Event Follow-up, New Lead, Thank You"
+                    value={newTemplateName}
+                    onChange={(e) => setNewTemplateName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="template-body">Template Text</Label>
+                  <Textarea
+                    id="template-body"
+                    placeholder="Hi {{name}}, it was great connecting with you. This is {{my_name}} from {{company}}."
+                    value={newTemplateBody}
+                    onChange={(e) => setNewTemplateBody(e.target.value)}
+                    rows={4}
+                  />
+                  <p className="text-xs text-slate-500">
+                    Use placeholders: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{my_name}}'}</code>
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveTemplate}
+                    className="flex-1 gradient-bg"
+                  >
+                    {editingTemplate ? 'Update Template' : 'Create Template'}
+                  </Button>
+                  {editingTemplate && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingTemplate(null);
+                        setNewTemplateName('');
+                        setNewTemplateBody('');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
