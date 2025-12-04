@@ -130,6 +130,8 @@ export default function CRM() {
 
     const loadContacts = async () => {
       setIsLoading(true);
+      console.log('Loading contacts for user:', user.id);
+      
       const { data, error } = await supabase
         .from('contacts')
         .select('*')
@@ -144,6 +146,8 @@ export default function CRM() {
           variant: 'destructive',
         });
       } else {
+        console.log('Contacts loaded:', data?.length || 0);
+        console.log('First contact tags:', data?.[0]?.tags);
         setContacts(data || []);
       }
       setIsLoading(false);
@@ -317,7 +321,7 @@ export default function CRM() {
   };
 
   const handleSaveTags = async () => {
-    if (!editingContact) return;
+    if (!editingContact || !user) return;
 
     let finalTags = [...selectedTags];
 
@@ -332,29 +336,44 @@ export default function CRM() {
       finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     }
 
+    console.log('Saving tags for contact:', editingContact.id);
+    console.log('Final tags to save:', finalTags);
+
     try {
-      const { error } = await supabase
+      const { data: updatedContact, error } = await supabase
         .from('contacts')
         .update({ 
           tags: finalTags,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', editingContact.id);
+        .eq('id', editingContact.id)
+        .eq('owner_user_id', user.id)
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error saving tags:', error);
+        throw error;
+      }
 
-      // Update local state
+      console.log('Tags saved successfully to database:', updatedContact);
+
+      // Update local state with database response
       setContacts(contacts.map(c => 
-        c.id === editingContact.id ? { ...c, tags: finalTags, updated_at: new Date().toISOString() } : c
+        c.id === editingContact.id ? updatedContact : c
       ));
 
       toast({
         title: 'Tags Saved',
-        description: 'Contact tags have been saved to database.',
+        description: `Tags have been saved: ${finalTags.join(', ')}`,
       });
 
       setTagModalOpen(false);
       setEditingContact(null);
+      setSelectedTags([]);
+      setCustomTag('');
+      setEventTagEnabled(false);
+      setEventName('');
     } catch (error: any) {
       console.error('Error saving tags:', error);
       toast({
@@ -403,6 +422,8 @@ export default function CRM() {
       return;
     }
 
+    if (!user) return;
+
     let tagsToAdd = [...bulkTags];
 
     if (bulkCustomTag.trim()) {
@@ -422,6 +443,9 @@ export default function CRM() {
       return;
     }
 
+    console.log('Bulk updating tags for', bulkSelectedContacts.size, 'contacts');
+    console.log('Tags to add:', tagsToAdd);
+
     try {
       // Build all updates with merged tags
       const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
@@ -431,18 +455,24 @@ export default function CRM() {
         const existingTags = contact.tags || [];
         const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
 
-        const { error } = await supabase
+        console.log(`Updating contact ${contactId} with tags:`, mergedTags);
+
+        const { data, error } = await supabase
           .from('contacts')
           .update({ 
             tags: mergedTags,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', contactId);
+          .eq('id', contactId)
+          .eq('owner_user_id', user.id)
+          .select()
+          .single();
 
         if (error) {
           console.error(`Failed to update contact ${contactId}:`, error);
           return { success: false, id: contactId };
         }
+        console.log(`Successfully updated contact ${contactId}:`, data);
         return { success: true, id: contactId };
       });
 
@@ -451,15 +481,17 @@ export default function CRM() {
       const failCount = results.filter(r => r && !r.success).length;
 
       // Reload all contacts from database to ensure sync
+      console.log('Reloading all contacts from database...');
       const { data, error: reloadError } = await supabase
         .from('contacts')
         .select('*')
-        .eq('owner_user_id', user!.id)
+        .eq('owner_user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (reloadError) {
         console.error('Error reloading contacts:', reloadError);
       } else if (data) {
+        console.log('Contacts reloaded successfully:', data.length);
         setContacts(data);
       }
 
