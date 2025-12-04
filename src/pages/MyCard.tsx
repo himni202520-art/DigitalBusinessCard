@@ -261,6 +261,18 @@ export default function MyCard() {
       return;
     }
 
+    // Check if we're in an iframe (preview mode)
+    if (window.self !== window.top) {
+      toast({
+        title: 'NFC Not Available in Preview',
+        description: 'NFC writing only works in the published app or when opened in a new tab. Click the link below to open in a new window.',
+        variant: 'destructive',
+      });
+      // Optionally open in new tab
+      window.open(window.location.href, '_blank');
+      return;
+    }
+
     setIsWritingNfc(true);
     try {
       const ndef = new (window as any).NDEFReader();
@@ -288,11 +300,23 @@ export default function MyCard() {
       setNfcModalOpen(false);
     } catch (error: any) {
       console.error('NFC write error:', error);
-      toast({
-        title: 'NFC Write Failed',
-        description: error.message || 'Failed to write to NFC card. Please try again.',
-        variant: 'destructive',
-      });
+      
+      // Check for iframe context error
+      if (error.message && error.message.includes('top-level browsing context')) {
+        toast({
+          title: 'NFC Not Available in Preview',
+          description: 'Please use the published app or open in a new tab to write NFC cards.',
+          variant: 'destructive',
+        });
+        // Open in new tab
+        window.open(window.location.href, '_blank');
+      } else {
+        toast({
+          title: 'NFC Write Failed',
+          description: error.message || 'Failed to write to NFC card. Please try again.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsWritingNfc(false);
     }
@@ -439,7 +463,10 @@ export default function MyCard() {
               Hold your NFC card behind your phone when prompted. We will write your public link to this card.
               <br />
               <span className="text-xs text-muted-foreground mt-2 block">
-                Works only on supported NFC devices (mainly Android + Chrome)
+                ⚠️ Works only on Android devices using Chrome
+              </span>
+              <span className="text-xs text-amber-600 dark:text-amber-400 mt-1 block font-medium">
+                Note: NFC writing requires opening this app in a new browser tab or using the published version (not preview mode)
               </span>
             </DialogDescription>
           </DialogHeader>
