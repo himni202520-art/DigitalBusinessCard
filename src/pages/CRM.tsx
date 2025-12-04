@@ -237,7 +237,8 @@ export default function CRM() {
       ...TEMPERATURE_TAGS,
       ...RELATIONSHIP_TAGS,
       ...SOURCE_TAGS,
-      ...getEventTags(),
+      ...STATUS_TAGS,          // ✅ include status tags in filter
+      ...getEventTags(),       // ✅ event tags from contacts
     ];
     return allTags;
   };
@@ -329,43 +330,38 @@ export default function CRM() {
       finalTags.push(customTag.trim());
     }
 
+    // Always ensure at most one Event: tag
+    finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     if (eventTagEnabled && eventName.trim()) {
-      finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
       finalTags.push(`Event: ${eventName.trim()}`);
-    } else {
-      finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     }
 
     console.log('Saving tags for contact:', editingContact.id);
     console.log('Final tags to save:', finalTags);
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('contacts')
         .update({ 
           tags: finalTags,
           updated_at: new Date().toISOString(),
         })
         .eq('id', editingContact.id)
-        .eq('owner_user_id', user.id)
-        .select(); // removed .single()
+        .eq('owner_user_id', user.id);
 
       if (error) {
         console.error('Supabase error saving tags:', error);
         throw error;
       }
 
-      const updatedContact = (data && data[0]) as Contact | undefined;
-      console.log('Tags saved successfully to database:', updatedContact);
-
-      // Update local state with database response (if any)
-      if (updatedContact) {
-        setContacts(contacts.map(c => 
-          c.id === editingContact.id ? updatedContact : c
-        ));
-      } else {
-        console.warn('No updated contact returned from Supabase');
-      }
+      // ✅ Update local state directly so UI reflects immediately
+      setContacts(prev =>
+        prev.map(c =>
+          c.id === editingContact.id
+            ? { ...c, tags: finalTags }
+            : c
+        )
+      );
 
       toast({
         title: 'Tags Saved',
@@ -469,7 +465,7 @@ export default function CRM() {
           })
           .eq('id', contactId)
           .eq('owner_user_id', user.id)
-          .select(); // removed .single()
+          .select(); // no .single()
 
         if (error) {
           console.error(`Failed to update contact ${contactId}:`, error);
@@ -1429,7 +1425,7 @@ export default function CRM() {
                   checked={eventTagEnabled}
                   onCheckedChange={(checked) => setEventTagEnabled(checked as boolean)}
                 />
-                <Label htmlFor="event-tag" className="text-sm font-medium cursor-pointer">
+              <Label htmlFor="event-tag" className="text-sm font-medium cursor-pointer">
                   Event
                 </Label>
               </div>
@@ -1768,4 +1764,4 @@ export default function CRM() {
       </Dialog>
     </div>
   );
-}
+                   }
