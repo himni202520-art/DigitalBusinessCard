@@ -5,7 +5,7 @@ import { BusinessCardData, BusinessCard } from '@/types/business-card';
 import { BusinessCardPreview } from '@/components/business-card-preview';
 import { BusinessCardForm } from '@/components/business-card-form';
 import { QRCodeComponent } from '@/components/qr-code';
-import { CreditCard, Edit, X, Save, Loader2, Share2, Menu, LogOut } from 'lucide-react';
+import { CreditCard, Edit, X, Save, Loader2, Share2, Menu, LogOut, Nfc } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +19,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { authService } from '@/lib/auth';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 export default function MyCard() {
   const [cardData, setCardData] = useState<BusinessCardData>({
@@ -40,6 +47,8 @@ export default function MyCard() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [nfcModalOpen, setNfcModalOpen] = useState(false);
+  const [isWritingNfc, setIsWritingNfc] = useState(false);
   const { user, loading, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -232,6 +241,63 @@ export default function MyCard() {
     navigate('/');
   };
 
+  const handleWriteNfc = async () => {
+    if (!publicUrl) {
+      toast({
+        title: 'No URL Available',
+        description: 'Your card must be saved before writing to NFC.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check NFC support
+    if (!('NDEFReader' in window)) {
+      toast({
+        title: 'NFC Not Supported',
+        description: 'NFC is not supported on this device or browser. Works mainly on Android devices using Chrome.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsWritingNfc(true);
+    try {
+      const ndef = new (window as any).NDEFReader();
+      await ndef.write({
+        records: [
+          { recordType: 'url', data: publicUrl }
+        ]
+      });
+
+      // Log NFC write to database
+      if (user && card) {
+        await supabase
+          .from('nfc_links')
+          .insert({
+            user_id: user.id,
+            card_id: card.id,
+            public_url: publicUrl,
+          });
+      }
+
+      toast({
+        title: 'NFC Card Linked Successfully!',
+        description: 'Your business card URL has been written to the NFC tag.',
+      });
+      setNfcModalOpen(false);
+    } catch (error: any) {
+      console.error('NFC write error:', error);
+      toast({
+        title: 'NFC Write Failed',
+        description: error.message || 'Failed to write to NFC card. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsWritingNfc(false);
+    }
+  };
+
   const publicUrl = slug ? `${window.location.origin}/card/${slug}` : '';
 
   if (loading || isLoading) {
@@ -309,6 +375,19 @@ export default function MyCard() {
             </div>
           )}
 
+          {/* NFC Card Writer */}
+          {slug && (
+            <Button
+              onClick={() => setNfcModalOpen(true)}
+              variant="outline"
+              className="w-full"
+              size="lg"
+            >
+              <Nfc className="w-4 h-4 mr-2" />
+              Connect NFC Card
+            </Button>
+          )}
+
           {/* Share Button */}
           {slug && (
             <Button
@@ -350,6 +429,54 @@ export default function MyCard() {
           )}
         </div>
       </main>
+
+      {/* NFC Write Modal */}
+      <Dialog open={nfcModalOpen} onOpenChange={setNfcModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Connect NFC Card</DialogTitle>
+            <DialogDescription>
+              Hold your NFC card behind your phone when prompted. We will write your public link to this card.
+              <br />
+              <span className="text-xs text-muted-foreground mt-2 block">
+                Works only on supported NFC devices (mainly Android + Chrome)
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 text-sm">
+              <p className="font-medium mb-2">Your Card URL:</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 break-all">{publicUrl}</p>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                onClick={handleWriteNfc}
+                disabled={isWritingNfc}
+                className="flex-1 gradient-bg"
+              >
+                {isWritingNfc ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Writing... Hold NFC Card Near Phone
+                  </>
+                ) : (
+                  <>
+                    <Nfc className="w-4 h-4 mr-2" />
+                    Write to NFC Card
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => setNfcModalOpen(false)}
+                variant="outline"
+                disabled={isWritingNfc}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

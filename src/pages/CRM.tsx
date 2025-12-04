@@ -332,35 +332,37 @@ export default function CRM() {
       finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     }
 
-    const { error } = await supabase
-      .from('contacts')
-      .update({ 
-        tags: finalTags,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', editingContact.id);
+    try {
+      const { error } = await supabase
+        .from('contacts')
+        .update({ 
+          tags: finalTags,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingContact.id);
 
-    if (error) {
-      console.error('Error updating tags:', error);
+      if (error) throw error;
+
+      // Update local state
+      setContacts(contacts.map(c => 
+        c.id === editingContact.id ? { ...c, tags: finalTags, updated_at: new Date().toISOString() } : c
+      ));
+
       toast({
-        title: 'Update Failed',
-        description: 'Failed to update tags.',
+        title: 'Tags Saved',
+        description: 'Contact tags have been saved to database.',
+      });
+
+      setTagModalOpen(false);
+      setEditingContact(null);
+    } catch (error: any) {
+      console.error('Error saving tags:', error);
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save tags. Please try again.',
         variant: 'destructive',
       });
-      return;
     }
-
-    setContacts(contacts.map(c => 
-      c.id === editingContact.id ? { ...c, tags: finalTags } : c
-    ));
-
-    toast({
-      title: 'Tags Updated',
-      description: 'Contact tags have been updated successfully.',
-    });
-
-    setTagModalOpen(false);
-    setEditingContact(null);
   };
 
   const openBulkEdit = () => {
@@ -411,47 +413,80 @@ export default function CRM() {
       tagsToAdd.push(`Event: ${bulkEventName.trim()}`);
     }
 
+    if (tagsToAdd.length === 0) {
+      toast({
+        title: 'No Tags Selected',
+        description: 'Please select at least one tag to add.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
+      // Build all updates with merged tags
       const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
         const contact = contacts.find(c => c.id === contactId);
-        if (!contact) return;
+        if (!contact) return { success: false, id: contactId };
 
         const existingTags = contact.tags || [];
         const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
 
-        return supabase
+        const { error } = await supabase
           .from('contacts')
           .update({ 
             tags: mergedTags,
             updated_at: new Date().toISOString(),
           })
           .eq('id', contactId);
+
+        if (error) {
+          console.error(`Failed to update contact ${contactId}:`, error);
+          return { success: false, id: contactId };
+        }
+        return { success: true, id: contactId };
       });
 
-      await Promise.all(updates);
+      const results = await Promise.all(updates);
+      const successCount = results.filter(r => r?.success).length;
+      const failCount = results.filter(r => r && !r.success).length;
 
-      // Reload contacts
-      const { data } = await supabase
+      // Reload all contacts from database to ensure sync
+      const { data, error: reloadError } = await supabase
         .from('contacts')
         .select('*')
         .eq('owner_user_id', user!.id)
         .order('created_at', { ascending: false });
 
-      if (data) {
+      if (reloadError) {
+        console.error('Error reloading contacts:', reloadError);
+      } else if (data) {
         setContacts(data);
       }
 
-      toast({
-        title: 'Bulk Update Complete',
-        description: `Updated tags for ${bulkSelectedContacts.size} contact(s).`,
-      });
+      if (failCount > 0) {
+        toast({
+          title: 'Partial Update',
+          description: `Updated ${successCount} contact(s). Failed to update ${failCount} contact(s).`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Bulk Update Complete',
+          description: `Successfully updated tags for ${successCount} contact(s).`,
+        });
+      }
 
       setBulkEditModalOpen(false);
-    } catch (error) {
+      setBulkSelectedContacts(new Set());
+      setBulkTags([]);
+      setBulkCustomTag('');
+      setBulkEventEnabled(false);
+      setBulkEventName('');
+    } catch (error: any) {
       console.error('Bulk update error:', error);
       toast({
         title: 'Bulk Update Failed',
-        description: 'Failed to update tags for some contacts.',
+        description: error.message || 'Failed to update tags. Please try again.',
         variant: 'destructive',
       });
     }
@@ -461,7 +496,9 @@ export default function CRM() {
   const startRecording = async (contact: Contact) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       transcriptRef.current = '';
@@ -471,30 +508,76 @@ export default function CRM() {
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
-        recognition.interimResults = false;
+        recognition.interimResults = true;
         recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+          console.log('Speech recognition started');
+        };
 
         recognition.onresult = (event: any) => {
+          console.log('Speech recognition result:', event);
+          let interimTranscript = '';
+          let finalTranscript = '';
+
           for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
-              transcriptRef.current += event.results[i][0].transcript + ' ';
+              finalTranscript += transcript + ' ';
+            } else {
+              interimTranscript += transcript;
             }
+          }
+
+          if (finalTranscript) {
+            transcriptRef.current += finalTranscript;
+            console.log('Final transcript so far:', transcriptRef.current);
           }
         };
 
         recognition.onerror = (event: any) => {
           console.error('Speech recognition error:', event.error);
+          if (event.error === 'no-speech') {
+            console.log('No speech detected, continuing...');
+          }
         };
 
-        recognition.start();
-        recognitionRef.current = recognition;
+        recognition.onend = () => {
+          console.log('Speech recognition ended');
+          // Restart if still recording
+          if (isRecording && recognitionRef.current) {
+            try {
+              recognition.start();
+            } catch (e) {
+              console.log('Recognition restart failed:', e);
+            }
+          }
+        };
+
+        try {
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (error) {
+          console.error('Failed to start speech recognition:', error);
+        }
+      } else {
+        console.warn('Speech recognition not supported');
       }
 
       mediaRecorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          console.log('Audio chunk captured:', event.data.size, 'bytes');
+        }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.onstop = () => {
+        console.log('Media recorder stopped');
+      };
+
+      // Request data every second to ensure capture
+      mediaRecorder.start(1000);
       setIsRecording(true);
       setRecordingContact(contact);
       setRecordingTime(0);
@@ -503,11 +586,13 @@ export default function CRM() {
       recordingTimerRef.current = window.setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
-    } catch (error) {
+
+      console.log('Recording started for contact:', contact.name);
+    } catch (error: any) {
       console.error('Error starting recording:', error);
       toast({
         title: 'Recording Failed',
-        description: 'Failed to access microphone. Please check permissions.',
+        description: error.message || 'Failed to access microphone. Please check permissions.',
         variant: 'destructive',
       });
     }
@@ -516,31 +601,46 @@ export default function CRM() {
   const stopRecording = async () => {
     if (!mediaRecorderRef.current || !recordingContact) return;
 
+    console.log('Stopping recording...');
     setIsRecording(false);
+    
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
     }
 
     // Stop speech recognition
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      } catch (error) {
+        console.error('Error stopping recognition:', error);
+      }
     }
 
-    mediaRecorderRef.current.stop();
+    // Stop media recorder
+    if (mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
     mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
 
-    // Wait for final chunks
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait for final chunks and recognition results
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     const transcript = transcriptRef.current.trim();
+    console.log('Final transcript:', transcript);
+    console.log('Audio chunks collected:', audioChunksRef.current.length);
 
     if (!transcript) {
+      // Try to use a default message if no speech detected
+      const defaultTranscript = `Meeting with ${recordingContact.name}. Discussion notes not captured via speech recognition. Please add notes manually.`;
+      
       toast({
-        title: 'No Speech Detected',
-        description: 'Could not transcribe audio. Please try again.',
-        variant: 'destructive',
+        title: 'Limited Transcription',
+        description: 'Speech recognition had limited results. You can add notes manually in the MoM editor.',
       });
-      setRecordingContact(null);
+      
+      generateMoM(defaultTranscript, recordingContact);
       return;
     }
 
