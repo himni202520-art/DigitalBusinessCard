@@ -340,7 +340,7 @@ export default function CRM() {
     console.log('Final tags to save:', finalTags);
 
     try {
-      const { data: updatedContact, error } = await supabase
+      const { data, error } = await supabase
         .from('contacts')
         .update({ 
           tags: finalTags,
@@ -348,20 +348,24 @@ export default function CRM() {
         })
         .eq('id', editingContact.id)
         .eq('owner_user_id', user.id)
-        .select()
-        .single();
+        .select(); // removed .single()
 
       if (error) {
         console.error('Supabase error saving tags:', error);
         throw error;
       }
 
+      const updatedContact = (data && data[0]) as Contact | undefined;
       console.log('Tags saved successfully to database:', updatedContact);
 
-      // Update local state with database response
-      setContacts(contacts.map(c => 
-        c.id === editingContact.id ? updatedContact : c
-      ));
+      // Update local state with database response (if any)
+      if (updatedContact) {
+        setContacts(contacts.map(c => 
+          c.id === editingContact.id ? updatedContact : c
+        ));
+      } else {
+        console.warn('No updated contact returned from Supabase');
+      }
 
       toast({
         title: 'Tags Saved',
@@ -465,14 +469,14 @@ export default function CRM() {
           })
           .eq('id', contactId)
           .eq('owner_user_id', user.id)
-          .select()
-          .single();
+          .select(); // removed .single()
 
         if (error) {
           console.error(`Failed to update contact ${contactId}:`, error);
           return { success: false, id: contactId };
         }
-        console.log(`Successfully updated contact ${contactId}:`, data);
+        const updatedContact = data && data[0];
+        console.log(`Successfully updated contact ${contactId}:`, updatedContact);
         return { success: true, id: contactId };
       });
 
