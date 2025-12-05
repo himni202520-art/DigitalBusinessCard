@@ -1010,7 +1010,9 @@ export default function CRM() {
                 {/* Tag Filters */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-slate-600">Filter by Tag</Label>
+                    <Label className="text-xs font-medium text-slate-600">
+  <span className="text-lg leading-none">🏷️</span>
+</Label>
                     <Button
                       variant="outline"
                       size="sm"
