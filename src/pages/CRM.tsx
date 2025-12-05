@@ -99,7 +99,7 @@ export default function CRM() {
   const [bulkCustomTag, setBulkCustomTag] = useState('');
   const [bulkEventEnabled, setBulkEventEnabled] = useState(false);
   const [bulkEventName, setBulkEventName] = useState('');
-  
+
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
   const [tempTagFilter, setTempTagFilter] = useState<string>('All');
@@ -123,7 +123,7 @@ export default function CRM() {
   const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateBody, setNewTemplateBody] = useState('');
-  
+
   const { user, loading } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -198,7 +198,7 @@ export default function CRM() {
     if (activeDateFilter !== 'all') {
       const now = new Date();
       const filterDate = new Date();
-      
+
       switch (activeDateFilter) {
         case 'today':
           filterDate.setHours(0, 0, 0, 0);
@@ -311,7 +311,7 @@ export default function CRM() {
     setEditingContact(contact);
     setSelectedTags(contact.tags || []);
     setCustomTag('');
-    
+
     const existingEventTag = (contact.tags || []).find(tag => tag.startsWith('Event:'));
     if (existingEventTag) {
       setEventTagEnabled(true);
@@ -320,7 +320,7 @@ export default function CRM() {
       setEventTagEnabled(false);
       setEventName('');
     }
-    
+
     setTagModalOpen(true);
   };
 
@@ -349,7 +349,7 @@ export default function CRM() {
     try {
       const { error } = await supabase
         .from('contacts')
-        .update({ 
+        .update({
           tags: finalTags,
           updated_at: new Date().toISOString(),
         })
@@ -442,7 +442,7 @@ export default function CRM() {
 
         const { error } = await supabase
           .from('contacts')
-          .update({ 
+          .update({
             tags: mergedTags,
             updated_at: new Date().toISOString(),
           })
@@ -563,7 +563,7 @@ export default function CRM() {
     if (!mediaRecorderRef.current || !recordingContact) return;
 
     setIsRecording(false);
-    
+
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
     }
@@ -588,12 +588,12 @@ export default function CRM() {
 
     if (!transcript) {
       const defaultTranscript = `Meeting with ${recordingContact.name}. Discussion notes not captured via speech recognition. Please add notes manually.`;
-      
+
       toast({
         title: 'Limited Transcription',
         description: 'You can add notes manually in the MoM editor.',
       });
-      
+
       generateMoM(defaultTranscript, recordingContact);
       return;
     }
@@ -649,7 +649,7 @@ export default function CRM() {
 
     const { error } = await supabase
       .from('contacts')
-      .update({ 
+      .update({
         meeting_notes: momText,
         updated_at: new Date().toISOString(),
       })
@@ -664,7 +664,7 @@ export default function CRM() {
       return;
     }
 
-    setContacts(contacts.map(c => 
+    setContacts(contacts.map(c =>
       c.id === momContactId ? { ...c, meeting_notes: momText } : c
     ));
 
@@ -738,8 +738,8 @@ export default function CRM() {
 
         if (error) throw error;
 
-        setTemplates(templates.map(t => 
-          t.id === editingTemplate.id 
+        setTemplates(templates.map(t =>
+          t.id === editingTemplate.id
             ? { ...t, name: newTemplateName, body_template: newTemplateBody }
             : t
         ));
@@ -1037,14 +1037,14 @@ export default function CRM() {
               {filteredContacts.map((contact) => (
                 <Card
                   key={contact.id}
-                  className={`p-5 rounded-2xl border-l-4 premium-shadow premium-shadow-hover transition-all ${getStatusColor(
+                  className={`p-4 rounded-2xl border-l-4 premium-shadow premium-shadow-hover transition-all ${getStatusColor(
                     contact.tags || []
                   )}`}
                 >
                   {/* Top Row: Name + Tags */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-slate-900 mb-2 truncate">
+                      <h3 className="text-[15px] font-semibold text-slate-900 mb-1 truncate">
                         {contact.name}
                       </h3>
                       <div className="flex flex-wrap gap-1.5">
@@ -1052,13 +1052,13 @@ export default function CRM() {
                           <Badge
                             key={idx}
                             variant="outline"
-                            className={`text-[10px] px-2 py-0.5 rounded-full ${getTagColor(tag)}`}
+                            className={`text-[10px] px-2 py-[3px] rounded-full ${getTagColor(tag)}`}
                           >
                             {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
                           </Badge>
                         ))}
                         {(contact.tags || []).length > 3 && (
-                          <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-full bg-slate-50">
+                          <Badge variant="outline" className="text-[10px] px-2 py-[3px] rounded-full bg-slate-50">
                             +{(contact.tags || []).length - 3}
                           </Badge>
                         )}
@@ -1075,21 +1075,21 @@ export default function CRM() {
                   </div>
 
                   {/* Info Row */}
-                  <div className="space-y-2 mb-4">
+                  <div className="space-y-1.5 mb-3">
                     {contact.email && (
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <div className="flex items-center gap-2 text-[12px] text-slate-600">
                         <Mail className="w-4 h-4 shrink-0 text-slate-400" />
                         <button
                           onClick={() => handleEmail(contact.email)}
-                          className="truncate hover:text-violet-600 transition-colors"
+                          className="truncate hover:text-violet-600 transition-colors text-left"
                         >
                           {contact.email}
                         </button>
                       </div>
                     )}
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 text-[12px] text-slate-600">
                       {contact.mobile ? (
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <div className="flex items-center gap-2">
                           <Phone className="w-4 h-4 shrink-0 text-slate-400" />
                           <button
                             onClick={() => handleCall(contact.mobile)}
@@ -1099,93 +1099,82 @@ export default function CRM() {
                           </button>
                         </div>
                       ) : (
-                        <span className="text-sm text-slate-400">No phone</span>
+                        <span className="text-[12px] text-slate-400">No phone</span>
                       )}
+
                       {contact.whatsapp && (
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="outline"
                           onClick={() => handleWhatsApp(contact)}
-                          className="h-7 px-3 rounded-full border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                          className="h-8 w-8 rounded-full border-[#25D366] bg-[#E9F9EE] text-[#25D366] hover:bg-[#25D366] hover:text-white transition-colors shadow-[0_2px_6px_rgba(37,211,102,0.4)]"
+                          aria-label="WhatsApp"
                         >
-                          <MessageCircle className="w-3.5 h-3.5 mr-1" />
-                          WhatsApp
+                          <WhatsAppIcon className="w-4 h-4" />
                         </Button>
                       )}
                     </div>
                   </div>
 
                   {/* Action Row */}
-                  <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
-                    {recordingContact?.id === contact.id ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={stopRecording}
-                        disabled={isProcessingMoM}
-                        className="flex-1 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
-                      >
-                        {isProcessingMoM ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <Square className="w-4 h-4 mr-1" />
-                            Stop {formatRecordingTime(recordingTime)}
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => startRecording(contact)}
-                        disabled={isRecording || isProcessingMoM}
-                        className="flex-1 rounded-xl"
-                      >
-                        <Mic className="w-4 h-4 mr-1" />
-                        Record
-                      </Button>
-                    )}
+                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                    <div className="flex-1">
+                      {recordingContact?.id === contact.id ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={stopRecording}
+                          disabled={isProcessingMoM}
+                          className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-[12px] flex items-center justify-center"
+                        >
+                          {isProcessingMoM ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <Square className="w-4 h-4 mr-1" />
+                              Stop {formatRecordingTime(recordingTime)}
+                            </>
+                          )}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => startRecording(contact)}
+                          disabled={isRecording || isProcessingMoM}
+                          className="w-full rounded-xl text-[12px] flex items-center justify-center"
+                        >
+                          <Mic className="w-4 h-4 mr-1" />
+                          Record meeting
+                        </Button>
+                      )}
+                    </div>
 
-                    {contact.email && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleEmail(contact.email)}
-                        className="flex-1 rounded-xl"
-                      >
-                        <Mail className="w-4 h-4 mr-1" />
-                        Email
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {contact.linkedin_url && (
+                        <IconCircleButton
+                          onClick={() => handleLinkedIn(contact.linkedin_url)}
+                          ariaLabel="Open LinkedIn"
+                        >
+                          <Linkedin className="w-[15px] h-[15px]" />
+                        </IconCircleButton>
+                      )}
 
-                    {contact.linkedin_url && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleLinkedIn(contact.linkedin_url)}
-                        className="flex-1 rounded-xl"
+                      <IconCircleButton
+                        onClick={() => handleSaveContact(contact)}
+                        ariaLabel="Download vCard"
+                        primary
                       >
-                        <Linkedin className="w-4 h-4 mr-1" />
-                        LinkedIn
-                      </Button>
-                    )}
-
-                    <Button
-                      size="sm"
-                      onClick={() => handleSaveContact(contact)}
-                      className="flex-1 rounded-xl synka-gradient text-white ripple-effect"
-                    >
-                      <Download className="w-4 h-4 mr-1" />
-                      Save
-                    </Button>
+                        <Download className="w-[15px] h-[15px]" />
+                      </IconCircleButton>
+                    </div>
                   </div>
 
                   {/* Footer Meta */}
-                  <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-400">
+                  <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
                     Added on {formatDateTime(contact.created_at)}
                   </div>
                 </Card>
@@ -1426,7 +1415,7 @@ export default function CRM() {
                     checked={bulkEventEnabled}
                     onCheckedChange={(checked) => setBulkEventEnabled(checked as boolean)}
                   />
-                  <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
+                <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
                     Event
                   </Label>
                 </div>
@@ -1473,7 +1462,7 @@ export default function CRM() {
               rows={12}
               className="font-mono text-sm rounded-xl"
             />
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Button
                 variant="outline"
@@ -1622,5 +1611,65 @@ export default function CRM() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Compact circular icon button used in the action row (LinkedIn, Save, etc.)
+ */
+function IconCircleButton({
+  children,
+  onClick,
+  ariaLabel,
+  primary,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  ariaLabel: string;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className={[
+        'flex h-9 w-9 items-center justify-center rounded-full border text-sm transition-all shadow-sm',
+        primary
+          ? 'border-violet-500 bg-gradient-to-r from-violet-500 to-indigo-500 text-white hover:shadow-md active:scale-95'
+          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:scale-95',
+      ].join(' ')}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Simple WhatsApp-like icon (chat bubble + phone), using currentColor.
+ * Keeps brand feel without extra dependencies.
+ */
+function WhatsAppIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      {/* Bubble */}
+      <path
+        d="M16 4c-6.1 0-11 4.6-11 10.4 0 2 .6 3.9 1.7 5.6L6 27l7.1-2.2c1 0.3 2.1 0.4 3.2 0.4 6.1 0 11-4.6 11-10.4S22.1 4 16 4z"
+        fill="currentColor"
+        fillOpacity="0.95"
+      />
+      {/* Inner circle cutout */}
+      <circle cx="16" cy="15" r="7.8" fill="white" />
+      {/* Phone shape */}
+      <path
+        d="M19.6 18.9c-.3-.2-1.7-.8-2-1-.3-.1-.5-.2-.7.2-.2.3-.7 1-.9 1.1-.2.2-.3.2-.6.1-1.6-.8-2.6-1.9-3.3-3.4-.1-.3 0-.4.2-.6.2-.2.3-.3.4-.5.1-.1.1-.2.2-.4.1-.2 0-.4 0-.5-.1-.2-.6-1.5-.8-2-.2-.5-.4-.4-.7-.4h-.6c-.2 0-.5.1-.7.3-.7.6-1 1.5-.7 2.5.8 2.3 2.3 4.1 4.3 5.4 1.4.9 2.7 1.2 3.6 1.5.4.1.8.1 1.1.1.3 0 .9-.3 1-0.7.1-.4.1-.8.1-.8-.2-.1-.4-.2-.5-.3z"
+        fill="#25D366"
+      />
+    </svg>
   );
 }
