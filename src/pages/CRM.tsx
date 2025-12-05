@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/lib/supabase';
@@ -59,6 +59,7 @@ interface Contact {
   created_at: string;
   tags?: string[];
   meeting_notes?: string;
+  synka_card_url?: string; // optional digital card URL
 }
 
 interface WhatsAppTemplate {
@@ -73,6 +74,14 @@ interface TagDef {
   name: string;
   group: string;
   user_id: string | null;
+}
+
+interface ContactNote {
+  id: string;
+  contact_id: string;
+  owner_user_id: string;
+  note: string;
+  created_at: string;
 }
 
 const DEFAULT_TEMPERATURE_TAGS = ['Hot', 'Warm', 'Cold'];
@@ -144,7 +153,7 @@ export default function CRM() {
   const [newSourceTag, setNewSourceTag] = useState('');
   const [newStatusTag, setNewStatusTag] = useState('');
 
-  // Quick filter bar customisation
+  // Quick filter bar
   const [primaryQuickTags, setPrimaryQuickTags] =
     useState<string[]>(DEFAULT_PRIMARY_TAGS);
   const [quickTagModalOpen, setQuickTagModalOpen] = useState(false);
@@ -155,6 +164,7 @@ export default function CRM() {
   // Infinite scroll
   const [visibleCount, setVisibleCount] = useState(20);
 
+  // Recording + MoM
   const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -168,6 +178,7 @@ export default function CRM() {
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>('');
 
+  // WhatsApp templates
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] =
@@ -175,11 +186,22 @@ export default function CRM() {
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateBody, setNewTemplateBody] = useState('');
 
+  // Notes
+  const [notesModalOpen, setNotesModalOpen] = useState(false);
+  const [notesContact, setNotesContact] = useState<Contact | null>(null);
+  const [contactNotes, setContactNotes] = useState<ContactNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+
+  // Full-screen contact view
+  const [contactDetailOpen, setContactDetailOpen] = useState(false);
+  const [detailContact, setDetailContact] = useState<Contact | null>(null);
+
   const { user, loading } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Derived tags per category from tagDefs
+  // Derived tag groups
   const temperatureTags = tagDefs.filter((t) => t.group === 'Temperature');
   const relationshipTags = tagDefs.filter((t) => t.group === 'Relationship');
   const sourceTags = tagDefs.filter((t) => t.group === 'Source');
@@ -240,7 +262,7 @@ export default function CRM() {
     loadTemplates();
   }, [user]);
 
-  // Seed default tags for user (first time) + load tags from Supabase
+  // Seed default tags per user + load tags from Supabase
   useEffect(() => {
     if (!user) return;
 
@@ -307,7 +329,6 @@ export default function CRM() {
 
         if (error) throw error;
 
-        // If user has no tags yet, seed defaults, then reload
         if (!data || data.length === 0) {
           await seedDefaultTagsForUser(user.id);
           const reload = await supabase
@@ -401,7 +422,7 @@ export default function CRM() {
     setVisibleCount(20);
   }, [filteredContacts.length]);
 
-  // Infinite scroll listener
+  // Infinite scroll
   useEffect(() => {
     const handleScroll = () => {
       if (
@@ -564,7 +585,7 @@ export default function CRM() {
     }
   };
 
-  // Add new tags to categories (per user, persisted)
+  // Add new tags to categories
   const handleAddTemperatureTag = async () => {
     const value = newTemperatureTag.trim();
     if (!value || !user) return;
@@ -665,7 +686,7 @@ export default function CRM() {
     }
   };
 
-  // Delete a tag from a category (per user, persisted)
+  // Delete a category tag
   const handleDeleteCategoryTag = async (tag: TagDef) => {
     if (!user) return;
 
@@ -677,7 +698,6 @@ export default function CRM() {
 
       setTagDefs((prev) => prev.filter((t) => t.id !== tag.id));
 
-      // Clean up selection / quick filters
       setSelectedTags((prev) => prev.filter((t) => t !== tag.name));
       setBulkTags((prev) => prev.filter((t) => t !== tag.name));
       setPrimaryQuickTags((prev) =>
@@ -708,7 +728,6 @@ export default function CRM() {
       finalTags.push(customTag.trim());
     }
 
-    // Remove old event tags
     finalTags = finalTags.filter((tag) => !tag.startsWith('Event:'));
     if (eventTagEnabled && eventName.trim()) {
       finalTags.push(`Event: ${eventName.trim()}`);
@@ -1241,6 +1260,90 @@ export default function CRM() {
     setQuickTagModalOpen(false);
   };
 
+  // Notes helpers
+  const loadNotesForContact = async (contactId: string) => {
+    if (!user) return;
+    setNotesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('contact_notes')
+        .select('*')
+        .eq('contact_id', contactId)
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setContactNotes(data || []);
+    } catch (error) {
+      console.error('Failed to load notes', error);
+      toast({
+        title: 'Notes load failed',
+        description: 'Could not load notes for this contact.',
+        variant: 'destructive',
+      });
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const openNotesModal = async (contact: Contact) => {
+    setNotesContact(contact);
+    setNotesModalOpen(true);
+    await loadNotesForContact(contact.id);
+  };
+
+  const addNote = async () => {
+    if (!notesContact || !user || !newNoteText.trim()) return;
+    const text = newNoteText.trim();
+
+    try {
+      const { data, error } = await supabase
+        .from('contact_notes')
+        .insert({
+          contact_id: notesContact.id,
+          owner_user_id: user.id,
+          note: text,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      setNewNoteText('');
+      setContactNotes((prev) => [data as ContactNote, ...prev]);
+
+      toast({
+        title: 'Note added',
+        description: 'Your note has been saved.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Save failed',
+        description: error.message || 'Failed to save note.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Full-screen contact view
+  const openContactDetail = async (contact: Contact) => {
+    setDetailContact(contact);
+    setContactDetailOpen(true);
+    setNotesContact(contact);
+    await loadNotesForContact(contact.id);
+  };
+
+  const handleCardClick = (contact: Contact) => {
+    openContactDetail(contact);
+  };
+
+  const handleCardChildClick = (
+    e: MouseEvent,
+    action: () => void
+  ) => {
+    e.stopPropagation();
+    action();
+  };
+
   if (loading || isLoading || tagsLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -1250,12 +1353,11 @@ export default function CRM() {
   }
 
   const isFilterActive = activeTagFilter !== 'All' || activeDateFilter !== 'all';
-
   const visibleContacts = filteredContacts.slice(0, visibleCount);
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Premium App Bar */}
+      {/* App Bar */}
       <header className="sticky top-0 z-50 bg-white border-b border-slate-100 backdrop-blur-xl bg-white/80">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between max-w-7xl mx-auto">
@@ -1322,7 +1424,7 @@ export default function CRM() {
               </SheetHeader>
 
               <div className="mt-6 space-y-6 overflow-y-auto max-h-[calc(85vh-180px)]">
-                {/* DATE FIRST - chip style */}
+                {/* Date chips */}
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Date Range</Label>
                   <div className="flex flex-wrap gap-2">
@@ -1345,7 +1447,7 @@ export default function CRM() {
                   </div>
                 </div>
 
-                {/* TAGS BY CATEGORY BELOW DATE */}
+                {/* Tag filters */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-semibold">Tag Filters</Label>
@@ -1433,7 +1535,7 @@ export default function CRM() {
                     </div>
                   </div>
 
-                  {/* Event tags */}
+                  {/* Events */}
                   {eventTags.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-slate-500">
@@ -1489,7 +1591,7 @@ export default function CRM() {
                     </div>
                   </div>
 
-                  {/* Custom / Other */}
+                  {/* Custom */}
                   {customTags.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-slate-500">
@@ -1538,7 +1640,7 @@ export default function CRM() {
         </div>
       </div>
 
-      {/* Primary quick tags + customisation */}
+      {/* Primary quick tags */}
       <div className="sticky top-[137px] z-30 bg-white border-b border-slate-100 px-4 py-3">
         <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar">
           {primaryQuickTags.map((tag) => (
@@ -1556,7 +1658,6 @@ export default function CRM() {
             </Badge>
           ))}
 
-          {/* Add / edit quick filters */}
           <Button
             type="button"
             size="icon"
@@ -1586,7 +1687,7 @@ export default function CRM() {
         </div>
       )}
 
-      {/* Main Content with infinite scroll */}
+      {/* Main Content */}
       <main className="px-4 py-6">
         <div className="max-w-7xl mx-auto">
           {contacts.length === 0 ? (
@@ -1617,6 +1718,7 @@ export default function CRM() {
                   className={`p-4 rounded-2xl border-l-4 premium-shadow premium-shadow-hover transition-all ${getStatusColor(
                     contact.tags || []
                   )}`}
+                  onClick={() => handleCardClick(contact)}
                 >
                   {/* Top Row: name + tags + date + menu */}
                   <div className="flex items-start justify-between gap-3 mb-2">
@@ -1652,7 +1754,9 @@ export default function CRM() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => openEditTags(contact)}
+                        onClick={(e) =>
+                          handleCardChildClick(e, () => openEditTags(contact))
+                        }
                         className="rounded-full h-8 w-8"
                       >
                         <MoreVertical className="w-4 h-4" />
@@ -1669,7 +1773,11 @@ export default function CRM() {
                       <div className="flex items-center gap-2 text-[12px] text-slate-600">
                         <Mail className="w-4 h-4 shrink-0 text-slate-400" />
                         <button
-                          onClick={() => handleEmail(contact.email)}
+                          onClick={(e) =>
+                            handleCardChildClick(e, () =>
+                              handleEmail(contact.email)
+                            )
+                          }
                           className="truncate hover:text-violet-600 transition-colors text-left"
                         >
                           {contact.email}
@@ -1682,7 +1790,11 @@ export default function CRM() {
                         <div className="flex items-center gap-2">
                           <Phone className="w-4 h-4 shrink-0 text-slate-400" />
                           <button
-                            onClick={() => handleCall(contact.mobile!)}
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                handleCall(contact.mobile!)
+                              )
+                            }
                             className="hover:text-violet-600 transition-colors"
                           >
                             {contact.mobile}
@@ -1699,7 +1811,9 @@ export default function CRM() {
                         {recordingContact?.id === contact.id ? (
                           <button
                             type="button"
-                            onClick={stopRecording}
+                            onClick={(e) =>
+                              handleCardChildClick(e, () => stopRecording())
+                            }
                             className="flex h-8 w-8 items-center justify-center rounded-full border border-red-300 bg-red-50 text-red-600 text-xs shadow-sm active:scale-95 transition"
                             aria-label="Stop recording"
                             disabled={isProcessingMoM}
@@ -1713,7 +1827,11 @@ export default function CRM() {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => startRecording(contact)}
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                startRecording(contact)
+                              )
+                            }
                             className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 text-xs shadow-sm active:scale-95 transition"
                             aria-label="Record meeting"
                             disabled={isRecording || isProcessingMoM}
@@ -1722,11 +1840,27 @@ export default function CRM() {
                           </button>
                         )}
 
+                        {/* Notes icon */}
+                        <button
+                          type="button"
+                          onClick={(e) =>
+                            handleCardChildClick(e, () => openNotesModal(contact))
+                          }
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 text-xs shadow-sm active:scale-95 transition"
+                          aria-label="Notes"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+
                         {/* WhatsApp */}
                         {contact.whatsapp && (
                           <button
                             type="button"
-                            onClick={() => handleWhatsApp(contact)}
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                handleWhatsApp(contact)
+                              )
+                            }
                             className="flex h-8 w-8 items-center justify-center rounded-full border-[#25D366] bg-[#E9F9EE] text-[#25D366] shadow-[0_2px_6px_rgba(37,211,102,0.4)] active:scale-95 transition"
                             aria-label="WhatsApp"
                           >
@@ -1756,7 +1890,6 @@ export default function CRM() {
                     </div>
                   </div>
 
-                  {/* Recording timer */}
                   {recordingContact?.id === contact.id && (
                     <div className="mt-2 text-[11px] text-red-500 flex items-center gap-1">
                       <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -1776,7 +1909,7 @@ export default function CRM() {
         </div>
       </main>
 
-      {/* Edit Tags Modal with per-header customisation */}
+      {/* Edit Tags Modal */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
@@ -1933,7 +2066,7 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Event just below Source */}
+            {/* Event */}
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -2010,7 +2143,7 @@ export default function CRM() {
               </div>
             </div>
 
-            {/* Custom Tag (free text for contact only) */}
+            {/* Custom tag for this contact only */}
             <div className="space-y-3">
               <Label className="text-sm font-semibold">Custom Tag</Label>
               <Input
@@ -2390,6 +2523,275 @@ export default function CRM() {
         </DialogContent>
       </Dialog>
 
+      {/* Notes Modal (icon click) */}
+      <Dialog open={notesModalOpen} onOpenChange={setNotesModalOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Notes - {notesContact ? notesContact.name : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              placeholder="Add a note about this contact..."
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              rows={3}
+              className="rounded-xl"
+            />
+            <Button
+              onClick={addNote}
+              disabled={!newNoteText.trim()}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Save Note
+            </Button>
+
+            <div className="border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-3">
+              {notesLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
+                </div>
+              ) : contactNotes.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No notes yet for this contact.
+                </p>
+              ) : (
+                contactNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    className="rounded-xl bg-slate-50 px-3 py-2"
+                  >
+                    <p className="text-xs text-slate-500 mb-1">
+                      {formatDateTime(note.created_at)}
+                    </p>
+                    <p className="text-sm text-slate-800 whitespace-pre-line">
+                      {note.note}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-screen Contact Detail */}
+      <Dialog open={contactDetailOpen} onOpenChange={setContactDetailOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {detailContact ? detailContact.name : 'Contact Details'}
+            </DialogTitle>
+          </DialogHeader>
+          {detailContact && (
+            <div className="space-y-5">
+              {/* SYNKA digital card link if present */}
+              {detailContact.synka_card_url && (
+                <Card className="p-3 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600">
+                      SYNKA Digital Card
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Open the digital card shared by this contact.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="rounded-xl synka-gradient ripple-effect"
+                    onClick={() =>
+                      window.open(detailContact.synka_card_url!, '_blank')
+                    }
+                  >
+                    Open
+                  </Button>
+                </Card>
+              )}
+
+              {/* Tags */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500">Tags</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(detailContact.tags || []).length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      No tags. Tap "..." on card to add tags.
+                    </p>
+                  ) : (
+                    (detailContact.tags || []).map((tag, idx) => (
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className={`text-[11px] px-2 py-[3px] rounded-full ${getTagColor(
+                          tag
+                        )}`}
+                      >
+                        {tag.startsWith('Event:')
+                          ? tag.replace('Event: ', '')
+                          : tag}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <Card className="p-4 rounded-2xl space-y-2">
+                {detailContact.email && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Mail className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() => handleEmail(detailContact.email)}
+                      className="hover:text-violet-600 transition-colors text-left truncate"
+                    >
+                      {detailContact.email}
+                    </button>
+                  </div>
+                )}
+                {detailContact.mobile && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Phone className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() => handleCall(detailContact.mobile!)}
+                      className="hover:text-violet-600 transition-colors"
+                    >
+                      {detailContact.mobile}
+                    </button>
+                  </div>
+                )}
+                {detailContact.whatsapp && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                    <button
+                      onClick={() => handleWhatsApp(detailContact)}
+                      className="hover:text-violet-600 transition-colors"
+                    >
+                      {detailContact.whatsapp}
+                    </button>
+                  </div>
+                )}
+                {detailContact.linkedin_url && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Linkedin className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() =>
+                        handleLinkedIn(detailContact.linkedin_url!)
+                      }
+                      className="hover:text-violet-600 transition-colors truncate"
+                    >
+                      {detailContact.linkedin_url}
+                    </button>
+                  </div>
+                )}
+                <div className="text-xs text-slate-400 mt-2">
+                  Added on {formatDateTime(detailContact.created_at)}
+                </div>
+              </Card>
+
+              {/* Existing MoM / meeting notes */}
+              {detailContact.meeting_notes && (
+                <Card className="p-4 rounded-2xl">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Meeting Notes (MoM)
+                    </p>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="rounded-full h-7 px-3 text-[11px]"
+                      onClick={() => {
+                        setMomContactId(detailContact.id);
+                        setMomText(detailContact.meeting_notes || '');
+                        setMomModalOpen(true);
+                      }}
+                    >
+                      View / Share
+                    </Button>
+                  </div>
+                  <p className="text-sm text-slate-700 line-clamp-4 whitespace-pre-line">
+                    {detailContact.meeting_notes}
+                  </p>
+                </Card>
+              )}
+
+              {/* Notes Section at bottom */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-500">Notes</p>
+                  {notesContact?.id !== detailContact.id && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="rounded-full h-7 px-3 text-[11px]"
+                      onClick={() => {
+                        setNotesContact(detailContact);
+                        loadNotesForContact(detailContact.id);
+                      }}
+                    >
+                      Load Notes
+                    </Button>
+                  )}
+                </div>
+
+                <Textarea
+                  placeholder="Add a note about this contact..."
+                  value={notesContact?.id === detailContact.id ? newNoteText : ''}
+                  onChange={(e) => {
+                    if (notesContact?.id === detailContact.id) {
+                      setNewNoteText(e.target.value);
+                    } else {
+                      setNotesContact(detailContact);
+                      setNewNoteText(e.target.value);
+                    }
+                  }}
+                  rows={3}
+                  className="rounded-xl"
+                />
+                <Button
+                  onClick={addNote}
+                  disabled={
+                    !notesContact ||
+                    notesContact.id !== detailContact.id ||
+                    !newNoteText.trim()
+                  }
+                  className="w-full rounded-xl synka-gradient ripple-effect"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  Save Note
+                </Button>
+
+                <div className="border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-3">
+                  {notesContact?.id !== detailContact.id || notesLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
+                    </div>
+                  ) : contactNotes.length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      No notes yet. Add your first note above.
+                    </p>
+                  ) : (
+                    contactNotes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="rounded-xl bg-slate-50 px-3 py-2"
+                      >
+                        <p className="text-xs text-slate-500 mb-1">
+                          {formatDateTime(note.created_at)}
+                        </p>
+                        <p className="text-sm text-slate-800 whitespace-pre-line">
+                          {note.note}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Quick Filter Tag Manager Modal */}
       <Dialog open={quickTagModalOpen} onOpenChange={setQuickTagModalOpen}>
         <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto rounded-3xl">
@@ -2469,10 +2871,15 @@ function IconCircleButton({
   ariaLabel: string;
   primary?: boolean;
 }) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick();
+  };
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={handleClick}
       aria-label={ariaLabel}
       className={[
         'flex h-8 w-8 items-center justify-center rounded-full border text-xs transition-all shadow-sm',
@@ -2507,4 +2914,4 @@ function WhatsAppIcon({ className }: { className?: string }) {
       />
     </svg>
   );
-        }
+}
