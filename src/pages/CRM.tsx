@@ -102,7 +102,7 @@ export default function CRM() {
 
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
-  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
+ the  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
   const [tempDateFilter, setTempDateFilter] = useState<string>('all');
 
   const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
@@ -1041,13 +1041,13 @@ export default function CRM() {
                     contact.tags || []
                   )}`}
                 >
-                  {/* Top Row: Name + Tags */}
+                  {/* Top Row: Name + Tags + Date + Menu */}
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex-1 min-w-0">
                       <h3 className="text-[15px] font-semibold text-slate-900 mb-1 truncate">
                         {contact.name}
                       </h3>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 items-center">
                         {(contact.tags || []).slice(0, 3).map((tag, idx) => (
                           <Badge
                             key={idx}
@@ -1064,18 +1064,23 @@ export default function CRM() {
                         )}
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openEditTags(contact)}
-                      className="rounded-full h-8 w-8 shrink-0"
-                    >
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openEditTags(contact)}
+                        className="rounded-full h-8 w-8"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                      <span className="text-[10px] text-slate-400">
+                        {formatDateTime(contact.created_at)}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Info Row */}
-                  <div className="space-y-1.5 mb-3">
+                  {/* Info + Icon Actions */}
+                  <div className="space-y-1.5">
                     {contact.email && (
                       <div className="flex items-center gap-2 text-[12px] text-slate-600">
                         <Mail className="w-4 h-4 shrink-0 text-slate-400" />
@@ -1087,12 +1092,13 @@ export default function CRM() {
                         </button>
                       </div>
                     )}
-                    <div className="flex items-center justify-between gap-2 text-[12px] text-slate-600">
+
+                    <div className="flex items-center justify-between gap-3 text-[12px] text-slate-600 mt-1">
                       {contact.mobile ? (
                         <div className="flex items-center gap-2">
                           <Phone className="w-4 h-4 shrink-0 text-slate-400" />
                           <button
-                            onClick={() => handleCall(contact.mobile)}
+                            onClick={() => handleCall(contact.mobile!)}
                             className="hover:text-violet-600 transition-colors"
                           >
                             {contact.mobile}
@@ -1102,80 +1108,66 @@ export default function CRM() {
                         <span className="text-[12px] text-slate-400">No phone</span>
                       )}
 
-                      {contact.whatsapp && (
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          onClick={() => handleWhatsApp(contact)}
-                          className="h-8 w-8 rounded-full border-[#25D366] bg-[#E9F9EE] text-[#25D366] hover:bg-[#25D366] hover:text-white transition-colors shadow-[0_2px_6px_rgba(37,211,102,0.4)]"
-                          aria-label="WhatsApp"
-                        >
-                          <WhatsAppIcon className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                      <div className="flex items-center gap-1.5">
+                        {/* Record icon */}
+                        {recordingContact?.id === contact.id ? (
+                          <button
+                            type="button"
+                            onClick={stopRecording}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-red-300 bg-red-50 text-red-600 text-xs shadow-sm active:scale-95 transition"
+                            aria-label="Stop recording"
+                            disabled={isProcessingMoM}
+                          >
+                            {isProcessingMoM ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => startRecording(contact)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 text-xs shadow-sm active:scale-95 transition"
+                            aria-label="Record meeting"
+                            disabled={isRecording || isProcessingMoM}
+                          >
+                            <Mic className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
-                  {/* Action Row */}
-                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                    <div className="flex-1">
-                      {recordingContact?.id === contact.id ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={stopRecording}
-                          disabled={isProcessingMoM}
-                          className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-[12px] flex items-center justify-center"
-                        >
-                          {isProcessingMoM ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                              Processing...
-                            </>
-                          ) : (
-                            <>
-                              <Square className="w-4 h-4 mr-1" />
-                              Stop {formatRecordingTime(recordingTime)}
-                            </>
-                          )}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => startRecording(contact)}
-                          disabled={isRecording || isProcessingMoM}
-                          className="w-full rounded-xl text-[12px] flex items-center justify-center"
-                        >
-                          <Mic className="w-4 h-4 mr-1" />
-                          Record meeting
-                        </Button>
-                      )}
-                    </div>
+                        {/* WhatsApp icon */}
+                        {contact.whatsapp && (
+                          <button
+                            type="button"
+                            onClick={() => handleWhatsApp(contact)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border-[#25D366] bg-[#E9F9EE] text-[#25D366] shadow-[0_2px_6px_rgba(37,211,102,0.4)] active:scale-95 transition"
+                            aria-label="WhatsApp"
+                          >
+                            <WhatsAppIcon className="w-4 h-4" />
+                          </button>
+                        )}
 
-                    <div className="flex items-center gap-2">
-                      {contact.linkedin_url && (
+                        {/* LinkedIn icon */}
+                        {contact.linkedin_url && (
+                          <IconCircleButton
+                            onClick={() => handleLinkedIn(contact.linkedin_url!)}
+                            ariaLabel="Open LinkedIn"
+                          >
+                            <Linkedin className="w-[15px] h-[15px]" />
+                          </IconCircleButton>
+                        )}
+
+                        {/* Save icon */}
                         <IconCircleButton
-                          onClick={() => handleLinkedIn(contact.linkedin_url)}
-                          ariaLabel="Open LinkedIn"
+                          onClick={() => handleSaveContact(contact)}
+                          ariaLabel="Download vCard"
+                          primary
                         >
-                          <Linkedin className="w-[15px] h-[15px]" />
+                          <Download className="w-[15px] h-[15px]" />
                         </IconCircleButton>
-                      )}
-
-                      <IconCircleButton
-                        onClick={() => handleSaveContact(contact)}
-                        ariaLabel="Download vCard"
-                        primary
-                      >
-                        <Download className="w-[15px] h-[15px]" />
-                      </IconCircleButton>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Footer Meta */}
-                  <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
-                    Added on {formatDateTime(contact.created_at)}
                   </div>
                 </Card>
               ))}
@@ -1415,7 +1407,7 @@ export default function CRM() {
                     checked={bulkEventEnabled}
                     onCheckedChange={(checked) => setBulkEventEnabled(checked as boolean)}
                   />
-                <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
+                  <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
                     Event
                   </Label>
                 </div>
@@ -1614,9 +1606,7 @@ export default function CRM() {
   );
 }
 
-/**
- * Compact circular icon button used in the action row (LinkedIn, Save, etc.)
- */
+/** Circular icon button used for LinkedIn / Save */
 function IconCircleButton({
   children,
   onClick,
@@ -1634,7 +1624,7 @@ function IconCircleButton({
       onClick={onClick}
       aria-label={ariaLabel}
       className={[
-        'flex h-9 w-9 items-center justify-center rounded-full border text-sm transition-all shadow-sm',
+        'flex h-8 w-8 items-center justify-center rounded-full border text-xs transition-all shadow-sm',
         primary
           ? 'border-violet-500 bg-gradient-to-r from-violet-500 to-indigo-500 text-white hover:shadow-md active:scale-95'
           : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:scale-95',
@@ -1645,10 +1635,7 @@ function IconCircleButton({
   );
 }
 
-/**
- * Simple WhatsApp-like icon (chat bubble + phone), using currentColor.
- * Keeps brand feel without extra dependencies.
- */
+/** WhatsApp-style icon using currentColor */
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -1657,15 +1644,12 @@ function WhatsAppIcon({ className }: { className?: string }) {
       aria-hidden="true"
       focusable="false"
     >
-      {/* Bubble */}
       <path
         d="M16 4c-6.1 0-11 4.6-11 10.4 0 2 .6 3.9 1.7 5.6L6 27l7.1-2.2c1 0.3 2.1 0.4 3.2 0.4 6.1 0 11-4.6 11-10.4S22.1 4 16 4z"
         fill="currentColor"
         fillOpacity="0.95"
       />
-      {/* Inner circle cutout */}
       <circle cx="16" cy="15" r="7.8" fill="white" />
-      {/* Phone shape */}
       <path
         d="M19.6 18.9c-.3-.2-1.7-.8-2-1-.3-.1-.5-.2-.7.2-.2.3-.7 1-.9 1.1-.2.2-.3.2-.6.1-1.6-.8-2.6-1.9-3.3-3.4-.1-.3 0-.4.2-.6.2-.2.3-.3.4-.5.1-.1.1-.2.2-.4.1-.2 0-.4 0-.5-.1-.2-.6-1.5-.8-2-.2-.5-.4-.4-.7-.4h-.6c-.2 0-.5.1-.7.3-.7.6-1 1.5-.7 2.5.8 2.3 2.3 4.1 4.3 5.4 1.4.9 2.7 1.2 3.6 1.5.4.1.8.1 1.1.1.3 0 .9-.3 1-0.7.1-.4.1-.8.1-.8-.2-.1-.4-.2-.5-.3z"
         fill="#25D366"
