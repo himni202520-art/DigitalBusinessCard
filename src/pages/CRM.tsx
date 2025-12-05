@@ -102,7 +102,7 @@ export default function CRM() {
 
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
- the  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
+  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
   const [tempDateFilter, setTempDateFilter] = useState<string>('all');
 
   const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
