@@ -18,6 +18,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -25,24 +32,27 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Users,
+  ArrowLeft,
+  Search,
+  Filter,
   Phone,
   Mail,
   Linkedin,
   MessageCircle,
   Download,
   Loader2,
-  ArrowLeft,
-  CreditCard,
-  Plus,
-  Tag,
-  Edit,
+  User,
   Mic,
   Square,
   Send,
   FileText,
   Trash2,
   Star,
+  Edit,
+  Tag,
+  Plus,
+  MoreVertical,
+  X,
 } from 'lucide-react';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 
@@ -65,19 +75,21 @@ interface WhatsAppTemplate {
   is_active: boolean;
 }
 
-// Predefined tag categories
 const TEMPERATURE_TAGS = ['Hot', 'Warm', 'Cold'];
 const RELATIONSHIP_TAGS = ['Client', 'Prospect', 'Vendor', 'Partner', 'Investor'];
 const SOURCE_TAGS = ['QR Scan', 'Referral', 'Website', 'Social Media'];
 const STATUS_TAGS = ['New', 'In Discussion', 'Follow-up', 'Closed Won', 'Closed Lost', 'Not Interested'];
+const PRIMARY_TAGS = ['All', 'Hot', 'Warm', 'Cold', 'Client', 'Vendor', 'Follow-up'];
 
 export default function CRM() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState('');
   const [eventTagEnabled, setEventTagEnabled] = useState(false);
@@ -88,11 +100,11 @@ export default function CRM() {
   const [bulkEventEnabled, setBulkEventEnabled] = useState(false);
   const [bulkEventName, setBulkEventName] = useState('');
   
-  // Filters
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
+  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
+  const [tempDateFilter, setTempDateFilter] = useState<string>('all');
 
-  // Recording states
   const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -106,7 +118,6 @@ export default function CRM() {
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>('');
 
-  // Template states
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null);
@@ -117,46 +128,32 @@ export default function CRM() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Redirect if not authenticated
   useEffect(() => {
     if (!loading && !user) {
       navigate('/');
     }
   }, [user, loading, navigate]);
 
-  // Load contacts
   useEffect(() => {
     if (!user) return;
 
     const loadContacts = async () => {
       setIsLoading(true);
-      console.log('Loading contacts for user:', user.id);
-      
       const { data, error } = await supabase
         .from('contacts')
         .select('*')
         .eq('owner_user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error loading contacts:', error);
-        toast({
-          title: 'Load Failed',
-          description: 'Failed to load contacts.',
-          variant: 'destructive',
-        });
-      } else {
-        console.log('Contacts loaded:', data?.length || 0);
-        console.log('First contact tags:', data?.[0]?.tags);
-        setContacts(data || []);
+      if (!error && data) {
+        setContacts(data);
       }
       setIsLoading(false);
     };
 
     loadContacts();
-  }, [user, toast]);
+  }, [user]);
 
-  // Load WhatsApp templates
   useEffect(() => {
     if (!user) return;
 
@@ -175,11 +172,19 @@ export default function CRM() {
     loadTemplates();
   }, [user]);
 
-  // Apply filters
   useEffect(() => {
     let filtered = [...contacts];
 
-    // Tag filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(contact =>
+        contact.name.toLowerCase().includes(query) ||
+        contact.email?.toLowerCase().includes(query) ||
+        contact.mobile?.toLowerCase().includes(query) ||
+        contact.whatsapp?.toLowerCase().includes(query)
+      );
+    }
+
     if (activeTagFilter !== 'All') {
       filtered = filtered.filter(contact => {
         const tags = contact.tags || [];
@@ -190,7 +195,6 @@ export default function CRM() {
       });
     }
 
-    // Date filter
     if (activeDateFilter !== 'all') {
       const now = new Date();
       const filterDate = new Date();
@@ -217,30 +221,41 @@ export default function CRM() {
     }
 
     setFilteredContacts(filtered);
-  }, [contacts, activeTagFilter, activeDateFilter]);
+  }, [contacts, searchQuery, activeTagFilter, activeDateFilter]);
 
-  const getEventTags = () => {
-    const eventTags = new Set<string>();
-    contacts.forEach(contact => {
-      const tags = contact.tags || [];
-      tags.forEach(tag => {
-        if (tag.startsWith('Event:')) {
-          eventTags.add(tag);
-        }
-      });
-    });
-    return Array.from(eventTags);
+  const getStatusColor = (tags: string[]) => {
+    if (tags.includes('Hot')) return 'border-l-red-500';
+    if (tags.includes('Warm')) return 'border-l-orange-500';
+    if (tags.includes('Cold')) return 'border-l-blue-500';
+    if (tags.includes('Client')) return 'border-l-green-500';
+    return 'border-l-slate-300';
   };
 
-  const getAllFilterTags = () => {
-    const allTags = [
-      ...TEMPERATURE_TAGS,
-      ...RELATIONSHIP_TAGS,
-      ...SOURCE_TAGS,
-      ...STATUS_TAGS,          // ✅ include status tags in filter
-      ...getEventTags(),       // ✅ event tags from contacts
-    ];
-    return allTags;
+  const getTagColor = (tag: string) => {
+    if (tag === 'Hot') return 'bg-red-50 text-red-700 border-red-200';
+    if (tag === 'Warm') return 'bg-orange-50 text-orange-700 border-orange-200';
+    if (tag === 'Cold') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (tag === 'Client') return 'bg-green-50 text-green-700 border-green-200';
+    if (tag.startsWith('Event:')) return 'bg-violet-50 text-violet-700 border-violet-200';
+    return 'bg-slate-50 text-slate-700 border-slate-200';
+  };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleCall = (mobile?: string) => {
@@ -257,19 +272,15 @@ export default function CRM() {
     if (!contact.whatsapp) return;
 
     const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
-    
-    // Get active template
     const activeTemplate = templates.find(t => t.is_active);
     let message = '';
 
     if (activeTemplate) {
-      // Replace placeholders
       message = activeTemplate.body_template
         .replace(/\{\{name\}\}/g, contact.name || '')
         .replace(/\{\{company\}\}/g, contact.email?.split('@')[1] || '')
         .replace(/\{\{my_name\}\}/g, user?.username || '');
     } else {
-      // Default message
       message = `Hi ${contact.name}, this is ${user?.username}. Saving your contact from my digital business card.`;
     }
 
@@ -330,14 +341,10 @@ export default function CRM() {
       finalTags.push(customTag.trim());
     }
 
-    // Always ensure at most one Event: tag
     finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
     if (eventTagEnabled && eventName.trim()) {
       finalTags.push(`Event: ${eventName.trim()}`);
     }
-
-    console.log('Saving tags for contact:', editingContact.id);
-    console.log('Final tags to save:', finalTags);
 
     try {
       const { error } = await supabase
@@ -349,12 +356,8 @@ export default function CRM() {
         .eq('id', editingContact.id)
         .eq('owner_user_id', user.id);
 
-      if (error) {
-        console.error('Supabase error saving tags:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      // ✅ Update local state directly so UI reflects immediately
       setContacts(prev =>
         prev.map(c =>
           c.id === editingContact.id
@@ -364,8 +367,8 @@ export default function CRM() {
       );
 
       toast({
-        title: 'Tags Saved',
-        description: `Tags have been saved: ${finalTags.join(', ')}`,
+        title: 'Tags Updated',
+        description: 'Contact tags have been saved successfully.',
       });
 
       setTagModalOpen(false);
@@ -375,10 +378,9 @@ export default function CRM() {
       setEventTagEnabled(false);
       setEventName('');
     } catch (error: any) {
-      console.error('Error saving tags:', error);
       toast({
-        title: 'Save Failed',
-        description: error.message || 'Failed to save tags. Please try again.',
+        title: 'Update Failed',
+        description: error.message || 'Failed to save tags.',
         variant: 'destructive',
       });
     }
@@ -413,23 +415,10 @@ export default function CRM() {
   };
 
   const handleBulkApply = async () => {
-    if (bulkSelectedContacts.size === 0) {
-      toast({
-        title: 'No Contacts Selected',
-        description: 'Please select at least one contact.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!user) return;
+    if (bulkSelectedContacts.size === 0 || !user) return;
 
     let tagsToAdd = [...bulkTags];
-
-    if (bulkCustomTag.trim()) {
-      tagsToAdd.push(bulkCustomTag.trim());
-    }
-
+    if (bulkCustomTag.trim()) tagsToAdd.push(bulkCustomTag.trim());
     if (bulkEventEnabled && bulkEventName.trim()) {
       tagsToAdd.push(`Event: ${bulkEventName.trim()}`);
     }
@@ -443,11 +432,7 @@ export default function CRM() {
       return;
     }
 
-    console.log('Bulk updating tags for', bulkSelectedContacts.size, 'contacts');
-    console.log('Tags to add:', tagsToAdd);
-
     try {
-      // Build all updates with merged tags
       const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
         const contact = contacts.find(c => c.id === contactId);
         if (!contact) return { success: false, id: contactId };
@@ -455,58 +440,33 @@ export default function CRM() {
         const existingTags = contact.tags || [];
         const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
 
-        console.log(`Updating contact ${contactId} with tags:`, mergedTags);
-
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('contacts')
           .update({ 
             tags: mergedTags,
             updated_at: new Date().toISOString(),
           })
           .eq('id', contactId)
-          .eq('owner_user_id', user.id)
-          .select(); // no .single()
+          .eq('owner_user_id', user.id);
 
-        if (error) {
-          console.error(`Failed to update contact ${contactId}:`, error);
-          return { success: false, id: contactId };
-        }
-        const updatedContact = data && data[0];
-        console.log(`Successfully updated contact ${contactId}:`, updatedContact);
-        return { success: true, id: contactId };
+        return { success: !error, id: contactId };
       });
 
       const results = await Promise.all(updates);
       const successCount = results.filter(r => r?.success).length;
-      const failCount = results.filter(r => r && !r.success).length;
 
-      // Reload all contacts from database to ensure sync
-      console.log('Reloading all contacts from database...');
-      const { data, error: reloadError } = await supabase
+      const { data } = await supabase
         .from('contacts')
         .select('*')
         .eq('owner_user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (reloadError) {
-        console.error('Error reloading contacts:', reloadError);
-      } else if (data) {
-        console.log('Contacts reloaded successfully:', data.length);
-        setContacts(data);
-      }
+      if (data) setContacts(data);
 
-      if (failCount > 0) {
-        toast({
-          title: 'Partial Update',
-          description: `Updated ${successCount} contact(s). Failed to update ${failCount} contact(s).`,
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Bulk Update Complete',
-          description: `Successfully updated tags for ${successCount} contact(s).`,
-        });
-      }
+      toast({
+        title: 'Bulk Update Complete',
+        description: `Successfully updated ${successCount} contact(s).`,
+      });
 
       setBulkEditModalOpen(false);
       setBulkSelectedContacts(new Set());
@@ -515,16 +475,14 @@ export default function CRM() {
       setBulkEventEnabled(false);
       setBulkEventName('');
     } catch (error: any) {
-      console.error('Bulk update error:', error);
       toast({
-        title: 'Bulk Update Failed',
-        description: error.message || 'Failed to update tags. Please try again.',
+        title: 'Update Failed',
+        description: error.message || 'Failed to update tags.',
         variant: 'destructive',
       });
     }
   };
 
-  // Meeting Recording Functions
   const startRecording = async (contact: Contact) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -535,54 +493,37 @@ export default function CRM() {
       audioChunksRef.current = [];
       transcriptRef.current = '';
 
-      // Initialize Speech Recognition
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
-        recognition.maxAlternatives = 1;
-
-        recognition.onstart = () => {
-          console.log('Speech recognition started');
-        };
 
         recognition.onresult = (event: any) => {
-          console.log('Speech recognition result:', event);
-          let interimTranscript = '';
           let finalTranscript = '';
-
           for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
-              finalTranscript += transcript + ' ';
-            } else {
-              interimTranscript += transcript;
+              finalTranscript += event.results[i][0].transcript + ' ';
             }
           }
-
           if (finalTranscript) {
             transcriptRef.current += finalTranscript;
-            console.log('Final transcript so far:', transcriptRef.current);
           }
         };
 
         recognition.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
-          if (event.error === 'no-speech') {
-            console.log('No speech detected, continuing...');
+          if (event.error !== 'no-speech') {
+            console.error('Speech recognition error:', event.error);
           }
         };
 
         recognition.onend = () => {
-          console.log('Speech recognition ended');
-          // Restart if still recording
           if (isRecording && recognitionRef.current) {
             try {
               recognition.start();
             } catch (e) {
-              console.log('Recognition restart failed:', e);
+              console.log('Recognition restart failed');
             }
           }
         };
@@ -591,40 +532,28 @@ export default function CRM() {
           recognition.start();
           recognitionRef.current = recognition;
         } catch (error) {
-          console.error('Failed to start speech recognition:', error);
+          console.error('Failed to start recognition');
         }
-      } else {
-        console.warn('Speech recognition not supported');
       }
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
-          console.log('Audio chunk captured:', event.data.size, 'bytes');
         }
       };
 
-      mediaRecorder.onstop = () => {
-        console.log('Media recorder stopped');
-      };
-
-      // Request data every second to ensure capture
       mediaRecorder.start(1000);
       setIsRecording(true);
       setRecordingContact(contact);
       setRecordingTime(0);
 
-      // Start timer
       recordingTimerRef.current = window.setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
-
-      console.log('Recording started for contact:', contact.name);
     } catch (error: any) {
-      console.error('Error starting recording:', error);
       toast({
         title: 'Recording Failed',
-        description: error.message || 'Failed to access microphone. Please check permissions.',
+        description: 'Failed to access microphone.',
         variant: 'destructive',
       });
     }
@@ -633,43 +562,36 @@ export default function CRM() {
   const stopRecording = async () => {
     if (!mediaRecorderRef.current || !recordingContact) return;
 
-    console.log('Stopping recording...');
     setIsRecording(false);
     
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
     }
 
-    // Stop speech recognition
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
         recognitionRef.current = null;
       } catch (error) {
-        console.error('Error stopping recognition:', error);
+        console.error('Error stopping recognition');
       }
     }
 
-    // Stop media recorder
     if (mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
 
-    // Wait for final chunks and recognition results
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     const transcript = transcriptRef.current.trim();
-    console.log('Final transcript:', transcript);
-    console.log('Audio chunks collected:', audioChunksRef.current.length);
 
     if (!transcript) {
-      // Try to use a default message if no speech detected
       const defaultTranscript = `Meeting with ${recordingContact.name}. Discussion notes not captured via speech recognition. Please add notes manually.`;
       
       toast({
         title: 'Limited Transcription',
-        description: 'Speech recognition had limited results. You can add notes manually in the MoM editor.',
+        description: 'You can add notes manually in the MoM editor.',
       });
       
       generateMoM(defaultTranscript, recordingContact);
@@ -699,7 +621,7 @@ export default function CRM() {
             const textContent = await error.context?.text();
             errorMessage = `[Code: ${statusCode}] ${textContent || error.message || 'Unknown error'}`;
           } catch {
-            errorMessage = `${error.message || 'Failed to read response'}`;
+            errorMessage = error.message || 'Failed to read response';
           }
         }
         throw new Error(errorMessage);
@@ -711,7 +633,6 @@ export default function CRM() {
         setMomModalOpen(true);
       }
     } catch (error: any) {
-      console.error('MoM generation error:', error);
       toast({
         title: 'MoM Generation Failed',
         description: error.message || 'Failed to generate Minutes of Meeting.',
@@ -748,8 +669,8 @@ export default function CRM() {
     ));
 
     toast({
-      title: 'Meeting Notes Saved',
-      description: 'Meeting notes have been saved to CRM.',
+      title: 'Notes Saved',
+      description: 'Meeting notes saved to CRM.',
     });
   };
 
@@ -773,7 +694,7 @@ export default function CRM() {
     const contact = contacts.find(c => c.id === momContactId);
     if (!contact?.email) {
       toast({
-        title: 'No Email Address',
+        title: 'No Email',
         description: 'This contact does not have an email address.',
         variant: 'destructive',
       });
@@ -790,7 +711,6 @@ export default function CRM() {
     shareMoMViaEmail();
   };
 
-  // Template Management
   const openTemplateManager = () => {
     setTemplateModalOpen(true);
   };
@@ -826,7 +746,7 @@ export default function CRM() {
 
         toast({
           title: 'Template Updated',
-          description: 'WhatsApp template has been updated.',
+          description: 'WhatsApp template updated successfully.',
         });
       } else {
         const { data, error } = await supabase
@@ -835,7 +755,7 @@ export default function CRM() {
             user_id: user!.id,
             name: newTemplateName,
             body_template: newTemplateBody,
-            is_active: templates.length === 0, // First template is active by default
+            is_active: templates.length === 0,
           })
           .select()
           .single();
@@ -846,7 +766,7 @@ export default function CRM() {
 
         toast({
           title: 'Template Created',
-          description: 'WhatsApp template has been created.',
+          description: 'WhatsApp template created successfully.',
         });
       }
 
@@ -854,7 +774,6 @@ export default function CRM() {
       setNewTemplateBody('');
       setEditingTemplate(null);
     } catch (error: any) {
-      console.error('Template save error:', error);
       toast({
         title: 'Save Failed',
         description: error.message || 'Failed to save template.',
@@ -879,13 +798,12 @@ export default function CRM() {
 
       toast({
         title: 'Active Template Set',
-        description: 'This template will be used for WhatsApp messages.',
+        description: 'Template will be used for WhatsApp messages.',
       });
     } catch (error: any) {
-      console.error('Set active template error:', error);
       toast({
         title: 'Update Failed',
-        description: error.message || 'Failed to set active template.',
+        description: 'Failed to set active template.',
         variant: 'destructive',
       });
     }
@@ -904,53 +822,35 @@ export default function CRM() {
 
       toast({
         title: 'Template Deleted',
-        description: 'WhatsApp template has been deleted.',
+        description: 'WhatsApp template deleted successfully.',
       });
     } catch (error: any) {
-      console.error('Delete template error:', error);
       toast({
         title: 'Delete Failed',
-        description: error.message || 'Failed to delete template.',
+        description: 'Failed to delete template.',
         variant: 'destructive',
       });
     }
   };
 
-  const formatDateTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const options: Intl.DateTimeFormatOptions = {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    };
-    return date.toLocaleString('en-US', options);
+  const applyFilters = () => {
+    setActiveTagFilter(tempTagFilter);
+    setActiveDateFilter(tempDateFilter);
+    setFilterSheetOpen(false);
   };
 
-  const formatRecordingTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const getTagColor = (tag: string) => {
-    if (TEMPERATURE_TAGS.includes(tag)) {
-      if (tag === 'Hot') return 'bg-red-100 text-red-700 border-red-200';
-      if (tag === 'Warm') return 'bg-amber-100 text-amber-700 border-amber-200';
-      return 'bg-blue-100 text-blue-700 border-blue-200';
-    }
-    if (tag.startsWith('Event:')) {
-      return 'bg-blue-100 text-blue-700 border-blue-200';
-    }
-    return 'bg-slate-100 text-slate-700 border-slate-200';
+  const clearFilters = () => {
+    setTempTagFilter('All');
+    setTempDateFilter('all');
+    setActiveTagFilter('All');
+    setActiveDateFilter('all');
+    setFilterSheetOpen(false);
   };
 
   if (loading || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
       </div>
     );
   }
@@ -958,110 +858,92 @@ export default function CRM() {
   const isFilterActive = activeTagFilter !== 'All' || activeDateFilter !== 'all';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-white">
+      {/* Premium App Bar */}
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-100 backdrop-blur-xl bg-white/80">
+        <div className="px-4 py-4">
+          <div className="flex items-center justify-between max-w-7xl mx-auto">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center">
-                <Users className="w-6 h-6 text-white" />
-              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate('/my-card')}
+                className="rounded-full hover:bg-slate-100"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
               <div>
-                <h1 className="text-xl font-bold gradient-text">CRM</h1>
-                <p className="text-xs text-muted-foreground">
+                <h1 className="text-xl font-bold synka-gradient-text">SYNKA CRM</h1>
+                <p className="text-xs text-slate-500">
                   {filteredContacts.length} contact{filteredContacts.length !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/my-card')}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              My Card
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate('/my-card')}
+              className="rounded-full hover:bg-slate-100"
+            >
+              <User className="w-5 h-5" />
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          {contacts.length === 0 ? (
-            <Card className="p-12">
-              <div className="text-center space-y-4">
-                <div className="w-20 h-20 mx-auto gradient-bg rounded-full flex items-center justify-center">
-                  <Users className="w-10 h-10 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold mb-2">No Contacts Yet</h2>
-                  <p className="text-muted-foreground mb-6">
-                    Share your business card to start collecting contacts
-                  </p>
-                  <Button onClick={() => navigate('/my-card')} className="gradient-bg">
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    View My Card
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ) : (
-            <>
-              {/* Filter Bar */}
-              <Card className="p-4 mb-6 space-y-4">
-                {/* Tag Filters */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-slate-600 flex items-center gap-1">
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="14"
-    height="14"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M3 7V3h4l6 6-4 4-6-6z" />
-    <path d="M3.5 3.5h.01" />
-  </svg>
-  Tag
-</Label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={openTemplateManager}
-                      className="h-7 text-xs"
-                    >
-                      <MessageCircle className="w-3 h-3 mr-1" />
-                      Templates
-                    </Button>
-                  </div>
+      {/* Search + Filter Bar */}
+      <div className="sticky top-[73px] z-40 bg-white border-b border-slate-100 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center gap-2">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              type="text"
+              placeholder="Search name, phone, email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10 rounded-xl border-slate-200 focus:border-violet-300 focus:ring-violet-300"
+            />
+          </div>
+          <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="rounded-xl h-10 w-10 relative"
+              >
+                <Filter className="w-4 h-4" />
+                {isFilterActive && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-violet-600 rounded-full" />
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[85vh] rounded-t-3xl">
+              <SheetHeader>
+                <SheetTitle>Filters</SheetTitle>
+              </SheetHeader>
+              <div className="mt-6 space-y-6 overflow-y-auto max-h-[calc(85vh-180px)]">
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Tags</Label>
                   <div className="flex flex-wrap gap-2">
-                    <Badge
-                      variant={activeTagFilter === 'All' ? 'default' : 'outline'}
-                      className="cursor-pointer"
-                      onClick={() => setActiveTagFilter('All')}
-                    >
-                      All
-                    </Badge>
-                    {getAllFilterTags().map(tag => (
+                    {['All', ...TEMPERATURE_TAGS, ...RELATIONSHIP_TAGS, ...SOURCE_TAGS, ...STATUS_TAGS].map(tag => (
                       <Badge
                         key={tag}
-                        variant={activeTagFilter === tag ? 'default' : 'outline'}
-                        className="cursor-pointer"
-                        onClick={() => setActiveTagFilter(tag)}
+                        variant={tempTagFilter === tag ? 'default' : 'outline'}
+                        className={`cursor-pointer px-3 py-1.5 rounded-full transition-all ${
+                          tempTagFilter === tag ? 'synka-gradient text-white border-0' : ''
+                        }`}
+                        onClick={() => setTempTagFilter(tag)}
                       >
-                        {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
+                        {tag}
                       </Badge>
                     ))}
                   </div>
                 </div>
 
-                {/* Date Filter */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-slate-600">Filter by Date</Label>
-                  <Select value={activeDateFilter} onValueChange={setActiveDateFilter}>
-                    <SelectTrigger className="w-full sm:w-48">
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Date Range</Label>
+                  <Select value={tempDateFilter} onValueChange={setTempDateFilter}>
+                    <SelectTrigger className="rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1073,310 +955,263 @@ export default function CRM() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
 
-                {/* Bulk Edit Button */}
-                {isFilterActive && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={openBulkEdit}
-                    className="w-full sm:w-auto"
-                  >
-                    <Edit className="w-4 h-4 mr-2" />
-                    Bulk Edit Tags ({filteredContacts.length} contacts)
-                  </Button>
-                )}
-              </Card>
+              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
+                  className="flex-1 rounded-xl"
+                >
+                  Clear All
+                </Button>
+                <Button
+                  onClick={applyFilters}
+                  className="flex-1 rounded-xl synka-gradient ripple-effect"
+                >
+                  Apply Filters
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
 
-              {/* Contacts List */}
-              <div className="w-full space-y-3">
-                {filteredContacts.map((contact) => (
-                  <Card key={contact.id} className="hover:shadow-lg transition-shadow">
-                    {/* Mobile Layout */}
-                    <div className="block md:hidden p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(contact.tags || []).map((tag, idx) => (
-                            <Badge
-                              key={idx}
-                              variant="outline"
-                              className={`text-[10px] px-2 py-0.5 ${getTagColor(tag)}`}
-                            >
-                              {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
-                            </Badge>
-                          ))}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditTags(contact)}
-                          className="h-6 w-6 p-0 shrink-0"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                      </div>
+      {/* Primary Tags Horizontal Scroll */}
+      <div className="sticky top-[137px] z-30 bg-white border-b border-slate-100 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {PRIMARY_TAGS.map(tag => (
+            <Badge
+              key={tag}
+              variant={activeTagFilter === tag ? 'default' : 'outline'}
+              className={`cursor-pointer px-4 py-2 rounded-full whitespace-nowrap transition-all shrink-0 ${
+                activeTagFilter === tag ? 'synka-gradient text-white border-0' : 'border-slate-200'
+              }`}
+              onClick={() => setActiveTagFilter(tag)}
+            >
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      </div>
 
-                      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+      {/* Bulk Edit Button */}
+      {isFilterActive && filteredContacts.length > 0 && (
+        <div className="px-4 py-3 bg-violet-50/50">
+          <div className="max-w-7xl mx-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openBulkEdit}
+              className="rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50"
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Bulk Edit ({filteredContacts.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="px-4 py-6">
+        <div className="max-w-7xl mx-auto">
+          {contacts.length === 0 ? (
+            <Card className="p-12 rounded-3xl premium-shadow text-center">
+              <div className="w-20 h-20 mx-auto mb-4 synka-gradient rounded-full flex items-center justify-center">
+                <User className="w-10 h-10 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold mb-2">No Contacts Yet</h2>
+              <p className="text-slate-600 mb-6">
+                Share your business card to start collecting contacts
+              </p>
+              <Button onClick={() => navigate('/my-card')} className="synka-gradient ripple-effect">
+                View My Card
+              </Button>
+            </Card>
+          ) : filteredContacts.length === 0 ? (
+            <Card className="p-12 rounded-3xl premium-shadow text-center">
+              <p className="text-slate-600">No contacts match your filters</p>
+            </Card>
+          ) : (
+            <div className="space-y-3 animate-slide-in">
+              {filteredContacts.map((contact) => (
+                <Card
+                  key={contact.id}
+                  className={`p-5 rounded-2xl border-l-4 premium-shadow premium-shadow-hover transition-all ${getStatusColor(
+                    contact.tags || []
+                  )}`}
+                >
+                  {/* Top Row: Name + Tags */}
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-lg font-bold text-slate-900 mb-2 truncate">
                         {contact.name}
                       </h3>
-                      
-                      {contact.email && (
-                        <div className="flex items-center gap-2">
-                          <Mail className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                          <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
-                            {contact.email}
-                          </p>
-                        </div>
-                      )}
-                      
-                      <div className="flex items-center justify-between gap-2 mt-2">
-                        {contact.mobile ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(contact.tags || []).slice(0, 3).map((tag, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="outline"
+                            className={`text-[10px] px-2 py-0.5 rounded-full ${getTagColor(tag)}`}
+                          >
+                            {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
+                          </Badge>
+                        ))}
+                        {(contact.tags || []).length > 3 && (
+                          <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-full bg-slate-50">
+                            +{(contact.tags || []).length - 3}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEditTags(contact)}
+                      className="rounded-full h-8 w-8 shrink-0"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  {/* Info Row */}
+                  <div className="space-y-2 mb-4">
+                    {contact.email && (
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <Mail className="w-4 h-4 shrink-0 text-slate-400" />
+                        <button
+                          onClick={() => handleEmail(contact.email)}
+                          className="truncate hover:text-violet-600 transition-colors"
+                        >
+                          {contact.email}
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      {contact.mobile ? (
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <Phone className="w-4 h-4 shrink-0 text-slate-400" />
                           <button
                             onClick={() => handleCall(contact.mobile)}
-                            className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                            className="hover:text-violet-600 transition-colors"
                           >
-                            <Phone className="w-3.5 h-3.5" />
-                            <span className="truncate">{contact.mobile}</span>
+                            {contact.mobile}
                           </button>
-                        ) : (
-                          <span className="text-xs text-slate-400">No phone</span>
-                        )}
-                        
-                        {contact.whatsapp && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleWhatsApp(contact)}
-                            className="h-7 px-3 text-xs border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
-                          >
-                            <MessageCircle className="w-3.5 h-3.5 mr-1" />
-                            WhatsApp
-                          </Button>
-                        )}
-                      </div>
-                      
-                      <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                        {/* Recording Button */}
-                        {recordingContact?.id === contact.id ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={stopRecording}
-                            disabled={isProcessingMoM}
-                            className="h-7 px-3 text-xs border-red-500 text-red-600"
-                          >
-                            {isProcessingMoM ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                                Processing...
-                              </>
-                            ) : (
-                              <>
-                                <Square className="w-3.5 h-3.5 mr-1" />
-                                Stop & Generate MoM ({formatRecordingTime(recordingTime)})
-                              </>
-                            )}
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startRecording(contact)}
-                            disabled={isRecording || isProcessingMoM}
-                            className="h-7 px-3 text-xs"
-                          >
-                            <Mic className="w-3.5 h-3.5 mr-1" />
-                            Record
-                          </Button>
-                        )}
-
-                        {contact.email && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEmail(contact.email)}
-                            className="h-7 px-3 text-xs"
-                          >
-                            <Mail className="w-3.5 h-3.5 mr-1" />
-                            Email
-                          </Button>
-                        )}
-                        {contact.linkedin_url && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleLinkedIn(contact.linkedin_url)}
-                            className="h-7 px-3 text-xs"
-                          >
-                            <Linkedin className="w-3.5 h-3.5 mr-1" />
-                            LinkedIn
-                          </Button>
-                        )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-400">No phone</span>
+                      )}
+                      {contact.whatsapp && (
                         <Button
                           size="sm"
-                          onClick={() => handleSaveContact(contact)}
-                          className="h-7 px-3 text-xs gradient-bg ml-auto"
+                          variant="outline"
+                          onClick={() => handleWhatsApp(contact)}
+                          className="h-7 px-3 rounded-full border-emerald-200 text-emerald-600 hover:bg-emerald-50"
                         >
-                          <Download className="w-3.5 h-3.5 mr-1" />
-                          Save
+                          <MessageCircle className="w-3.5 h-3.5 mr-1" />
+                          WhatsApp
                         </Button>
-                      </div>
-
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        Added on {formatDateTime(contact.created_at)}
-                      </p>
+                      )}
                     </div>
+                  </div>
 
-                    {/* Desktop Layout */}
-                    <div className="hidden md:grid md:grid-cols-[minmax(160px,2fr)_minmax(160px,2fr)_minmax(120px,1.5fr)_minmax(180px,1.5fr)] gap-3 p-5 items-center">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">
-                            {contact.name}
-                          </h3>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditTags(contact)}
-                            className="h-6 w-6 p-0 shrink-0"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {(contact.tags || []).map((tag, idx) => (
-                            <Badge
-                              key={idx}
-                              variant="outline"
-                              className={`text-[10px] px-2 py-0.5 ${getTagColor(tag)}`}
-                            >
-                              {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
-                            </Badge>
-                          ))}
-                        </div>
-                        <p className="text-[10px] text-slate-400">
-                          Added on {formatDateTime(contact.created_at)}
-                        </p>
-                      </div>
-                      
-                      <div className="flex items-center gap-2 min-w-0">
-                        {contact.email ? (
+                  {/* Action Row */}
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
+                    {recordingContact?.id === contact.id ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={stopRecording}
+                        disabled={isProcessingMoM}
+                        className="flex-1 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                      >
+                        {isProcessingMoM ? (
                           <>
-                            <Mail className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                            <button
-                              onClick={() => handleEmail(contact.email)}
-                              className="text-sm text-slate-600 dark:text-slate-400 hover:text-primary transition-colors truncate"
-                            >
-                              {contact.email}
-                            </button>
+                            <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                            Processing...
                           </>
                         ) : (
-                          <span className="text-sm text-slate-400">-</span>
-                        )}
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {contact.mobile ? (
                           <>
-                            <Phone className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                            <button
-                              onClick={() => handleCall(contact.mobile)}
-                              className="text-sm text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
-                            >
-                              {contact.mobile}
-                            </button>
+                            <Square className="w-4 h-4 mr-1" />
+                            Stop {formatRecordingTime(recordingTime)}
                           </>
-                        ) : (
-                          <span className="text-sm text-slate-400">-</span>
                         )}
-                      </div>
-                      
-                      <div className="flex items-center gap-2 justify-end">
-                        {recordingContact?.id === contact.id ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={stopRecording}
-                            disabled={isProcessingMoM}
-                            className="border-red-500 text-red-600"
-                          >
-                            {isProcessingMoM ? (
-                              <>
-                                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                                Processing...
-                              </>
-                            ) : (
-                              <>
-                                <Square className="w-4 h-4 mr-1" />
-                                Stop ({formatRecordingTime(recordingTime)})
-                              </>
-                            )}
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startRecording(contact)}
-                            disabled={isRecording || isProcessingMoM}
-                            title="Record Meeting"
-                          >
-                            <Mic className="w-4 h-4" />
-                          </Button>
-                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => startRecording(contact)}
+                        disabled={isRecording || isProcessingMoM}
+                        className="flex-1 rounded-xl"
+                      >
+                        <Mic className="w-4 h-4 mr-1" />
+                        Record
+                      </Button>
+                    )}
 
-                        {contact.whatsapp && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleWhatsApp(contact)}
-                            title="WhatsApp"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                          </Button>
-                        )}
-                        {contact.linkedin_url && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleLinkedIn(contact.linkedin_url)}
-                            title="LinkedIn"
-                          >
-                            <Linkedin className="w-4 h-4" />
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          onClick={() => handleSaveContact(contact)}
-                          className="gradient-bg"
-                          title="Save Contact"
-                        >
-                          <Download className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </>
+                    {contact.email && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleEmail(contact.email)}
+                        className="flex-1 rounded-xl"
+                      >
+                        <Mail className="w-4 h-4 mr-1" />
+                        Email
+                      </Button>
+                    )}
+
+                    {contact.linkedin_url && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleLinkedIn(contact.linkedin_url)}
+                        className="flex-1 rounded-xl"
+                      >
+                        <Linkedin className="w-4 h-4 mr-1" />
+                        LinkedIn
+                      </Button>
+                    )}
+
+                    <Button
+                      size="sm"
+                      onClick={() => handleSaveContact(contact)}
+                      className="flex-1 rounded-xl synka-gradient text-white ripple-effect"
+                    >
+                      <Download className="w-4 h-4 mr-1" />
+                      Save
+                    </Button>
+                  </div>
+
+                  {/* Footer Meta */}
+                  <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-400">
+                    Added on {formatDateTime(contact.created_at)}
+                  </div>
+                </Card>
+              ))}
+            </div>
           )}
         </div>
       </main>
 
       {/* Edit Tags Modal */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
-        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
-            <DialogTitle>Edit Tags - {editingContact?.name}</DialogTitle>
+            <DialogTitle>Edit Tags</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Lead Temperature</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Temperature</Label>
               <div className="flex flex-wrap gap-2">
                 {TEMPERATURE_TAGS.map(tag => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                    className="cursor-pointer"
+                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                    }`}
                     onClick={() => toggleTag(tag)}
                   >
                     {tag}
@@ -1385,14 +1220,16 @@ export default function CRM() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Relationship</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Relationship</Label>
               <div className="flex flex-wrap gap-2">
                 {RELATIONSHIP_TAGS.map(tag => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                    className="cursor-pointer"
+                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                    }`}
                     onClick={() => toggleTag(tag)}
                   >
                     {tag}
@@ -1401,14 +1238,16 @@ export default function CRM() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Source</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Source</Label>
               <div className="flex flex-wrap gap-2">
                 {SOURCE_TAGS.map(tag => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                    className="cursor-pointer"
+                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                    }`}
                     onClick={() => toggleTag(tag)}
                   >
                     {tag}
@@ -1417,14 +1256,16 @@ export default function CRM() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Status</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Status</Label>
               <div className="flex flex-wrap gap-2">
                 {STATUS_TAGS.map(tag => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                    className="cursor-pointer"
+                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                    }`}
                     onClick={() => toggleTag(tag)}
                   >
                     {tag}
@@ -1433,14 +1274,14 @@ export default function CRM() {
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="event-tag"
                   checked={eventTagEnabled}
                   onCheckedChange={(checked) => setEventTagEnabled(checked as boolean)}
                 />
-              <Label htmlFor="event-tag" className="text-sm font-medium cursor-pointer">
+                <Label htmlFor="event-tag" className="text-sm font-semibold cursor-pointer">
                   Event
                 </Label>
               </div>
@@ -1449,21 +1290,22 @@ export default function CRM() {
                   placeholder="Enter event name..."
                   value={eventName}
                   onChange={(e) => setEventName(e.target.value)}
-                  className="animate-slide-up"
+                  className="rounded-xl animate-slide-up"
                 />
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Custom Tag</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Custom Tag</Label>
               <Input
                 placeholder="Enter custom tag..."
                 value={customTag}
                 onChange={(e) => setCustomTag(e.target.value)}
+                className="rounded-xl"
               />
             </div>
 
-            <Button onClick={handleSaveTags} className="w-full gradient-bg">
+            <Button onClick={handleSaveTags} className="w-full rounded-xl synka-gradient ripple-effect">
               <Tag className="w-4 h-4 mr-2" />
               Save Tags
             </Button>
@@ -1473,7 +1315,7 @@ export default function CRM() {
 
       {/* Bulk Edit Modal */}
       <Dialog open={bulkEditModalOpen} onOpenChange={setBulkEditModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
             <DialogTitle>Bulk Edit Tags</DialogTitle>
           </DialogHeader>
@@ -1482,9 +1324,9 @@ export default function CRM() {
               {bulkSelectedContacts.size} contact{bulkSelectedContacts.size !== 1 ? 's' : ''} selected
             </p>
 
-            <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-3">
+            <div className="space-y-2 max-h-48 overflow-y-auto border rounded-2xl p-3">
               {filteredContacts.map(contact => (
-                <div key={contact.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded">
+                <div key={contact.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl">
                   <Checkbox
                     checked={bulkSelectedContacts.has(contact.id)}
                     onCheckedChange={() => toggleBulkContact(contact.id)}
@@ -1494,7 +1336,7 @@ export default function CRM() {
                     <p className="text-xs text-slate-500 truncate">{contact.email || contact.mobile}</p>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {(contact.tags || []).map((tag, idx) => (
-                        <Badge key={idx} variant="outline" className="text-[9px] px-1.5 py-0">
+                        <Badge key={idx} variant="outline" className="text-[9px] px-1.5 py-0 rounded-full">
                           {tag}
                         </Badge>
                       ))}
@@ -1505,14 +1347,16 @@ export default function CRM() {
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Lead Temperature</Label>
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Temperature</Label>
                 <div className="flex flex-wrap gap-2">
                   {TEMPERATURE_TAGS.map(tag => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
-                      className="cursor-pointer"
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
                       {tag}
@@ -1521,14 +1365,16 @@ export default function CRM() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Relationship</Label>
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Relationship</Label>
                 <div className="flex flex-wrap gap-2">
                   {RELATIONSHIP_TAGS.map(tag => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
-                      className="cursor-pointer"
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
                       {tag}
@@ -1537,14 +1383,16 @@ export default function CRM() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Source</Label>
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Source</Label>
                 <div className="flex flex-wrap gap-2">
                   {SOURCE_TAGS.map(tag => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
-                      className="cursor-pointer"
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
                       {tag}
@@ -1553,14 +1401,16 @@ export default function CRM() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Status</Label>
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Status</Label>
                 <div className="flex flex-wrap gap-2">
                   {STATUS_TAGS.map(tag => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
-                      className="cursor-pointer"
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
                       {tag}
@@ -1569,14 +1419,14 @@ export default function CRM() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="bulk-event-tag"
                     checked={bulkEventEnabled}
                     onCheckedChange={(checked) => setBulkEventEnabled(checked as boolean)}
                   />
-                  <Label htmlFor="bulk-event-tag" className="text-sm font-medium cursor-pointer">
+                  <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
                     Event
                   </Label>
                 </div>
@@ -1585,31 +1435,32 @@ export default function CRM() {
                     placeholder="Enter event name..."
                     value={bulkEventName}
                     onChange={(e) => setBulkEventName(e.target.value)}
-                    className="animate-slide-up"
+                    className="rounded-xl animate-slide-up"
                   />
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Custom Tag</Label>
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Custom Tag</Label>
                 <Input
                   placeholder="Enter custom tag..."
                   value={bulkCustomTag}
                   onChange={(e) => setBulkCustomTag(e.target.value)}
+                  className="rounded-xl"
                 />
               </div>
             </div>
 
-            <Button onClick={handleBulkApply} className="w-full gradient-bg">
+            <Button onClick={handleBulkApply} className="w-full rounded-xl synka-gradient ripple-effect">
               Apply to Selected Contacts
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Minutes of Meeting Modal */}
+      {/* MoM Modal */}
       <Dialog open={momModalOpen} onOpenChange={setMomModalOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl rounded-3xl">
           <DialogHeader>
             <DialogTitle>
               Minutes of Meeting - {contacts.find(c => c.id === momContactId)?.name}
@@ -1620,39 +1471,39 @@ export default function CRM() {
               value={momText}
               onChange={(e) => setMomText(e.target.value)}
               rows={12}
-              className="font-mono text-sm"
+              className="font-mono text-sm rounded-xl"
             />
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Button
                 variant="outline"
                 onClick={shareMoMViaWhatsApp}
-                className="w-full"
+                className="rounded-xl"
               >
                 <MessageCircle className="w-4 h-4 mr-2" />
-                Send via WhatsApp
+                WhatsApp
               </Button>
               <Button
                 variant="outline"
                 onClick={shareMoMViaEmail}
-                className="w-full"
+                className="rounded-xl"
               >
                 <Mail className="w-4 h-4 mr-2" />
-                Send via Email
+                Email
               </Button>
               <Button
                 variant="outline"
                 onClick={shareMoMViaBoth}
-                className="w-full"
+                className="rounded-xl"
               >
                 <Send className="w-4 h-4 mr-2" />
-                Send via Both
+                Both
               </Button>
             </div>
 
             <Button
               onClick={saveMoMToCRM}
-              className="w-full gradient-bg"
+              className="w-full rounded-xl synka-gradient ripple-effect"
             >
               <FileText className="w-4 h-4 mr-2" />
               Save to CRM
@@ -1661,28 +1512,27 @@ export default function CRM() {
         </DialogContent>
       </Dialog>
 
-      {/* WhatsApp Template Manager Modal */}
+      {/* Template Manager Modal */}
       <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
-            <DialogTitle>WhatsApp Message Templates</DialogTitle>
+            <DialogTitle>WhatsApp Templates</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
-            {/* Template List */}
             {templates.length > 0 && (
               <div className="space-y-3">
-                <Label className="text-sm font-medium">Saved Templates</Label>
+                <Label className="text-sm font-semibold">Saved Templates</Label>
                 {templates.map(template => (
-                  <Card key={template.id} className="p-4">
+                  <Card key={template.id} className="p-4 rounded-2xl premium-shadow">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2">
                           <h4 className="font-semibold text-sm">{template.name}</h4>
                           {template.is_active && (
-                            <Badge variant="default" className="text-xs">Active</Badge>
+                            <Badge className="text-xs synka-gradient border-0">Active</Badge>
                           )}
                         </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                        <p className="text-xs text-slate-600 line-clamp-2">
                           {template.body_template}
                         </p>
                       </div>
@@ -1692,7 +1542,7 @@ export default function CRM() {
                             size="sm"
                             variant="outline"
                             onClick={() => setActiveTemplate(template.id)}
-                            title="Set as active"
+                            className="rounded-xl"
                           >
                             <Star className="w-4 h-4" />
                           </Button>
@@ -1705,7 +1555,7 @@ export default function CRM() {
                             setNewTemplateName(template.name);
                             setNewTemplateBody(template.body_template);
                           }}
-                          title="Edit"
+                          className="rounded-xl"
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
@@ -1713,7 +1563,7 @@ export default function CRM() {
                           size="sm"
                           variant="outline"
                           onClick={() => deleteTemplate(template.id)}
-                          title="Delete"
+                          className="rounded-xl"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -1724,40 +1574,33 @@ export default function CRM() {
               </div>
             )}
 
-            {/* New/Edit Template Form */}
             <div className="space-y-4 pt-4 border-t">
-              <Label className="text-sm font-medium">
+              <Label className="text-sm font-semibold">
                 {editingTemplate ? 'Edit Template' : 'Create New Template'}
               </Label>
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="template-name">Template Name</Label>
-                  <Input
-                    id="template-name"
-                    placeholder="e.g., Event Follow-up, New Lead, Thank You"
-                    value={newTemplateName}
-                    onChange={(e) => setNewTemplateName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="template-body">Template Text</Label>
-                  <Textarea
-                    id="template-body"
-                    placeholder="Hi {{name}}, it was great connecting with you. This is {{my_name}} from {{company}}."
-                    value={newTemplateBody}
-                    onChange={(e) => setNewTemplateBody(e.target.value)}
-                    rows={4}
-                  />
-                  <p className="text-xs text-slate-500">
-                    Use placeholders: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{my_name}}'}</code>
-                  </p>
-                </div>
+                <Input
+                  placeholder="Template name..."
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                  className="rounded-xl"
+                />
+                <Textarea
+                  placeholder="Hi {{name}}, it was great connecting with you..."
+                  value={newTemplateBody}
+                  onChange={(e) => setNewTemplateBody(e.target.value)}
+                  rows={4}
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-slate-500">
+                  Use: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{my_name}}'}</code>
+                </p>
                 <div className="flex gap-2">
                   <Button
                     onClick={saveTemplate}
-                    className="flex-1 gradient-bg"
+                    className="flex-1 rounded-xl synka-gradient ripple-effect"
                   >
-                    {editingTemplate ? 'Update Template' : 'Create Template'}
+                    {editingTemplate ? 'Update' : 'Create'}
                   </Button>
                   {editingTemplate && (
                     <Button
@@ -1767,6 +1610,7 @@ export default function CRM() {
                         setNewTemplateName('');
                         setNewTemplateBody('');
                       }}
+                      className="rounded-xl"
                     >
                       Cancel
                     </Button>
@@ -1779,4 +1623,4 @@ export default function CRM() {
       </Dialog>
     </div>
   );
-                   }
+}
