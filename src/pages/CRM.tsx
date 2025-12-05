@@ -1010,8 +1010,21 @@ export default function CRM() {
                 {/* Tag Filters */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-slate-600">
-  <span className="text-lg leading-none">🏷️</span>
+                    <Label className="text-xs font-medium text-slate-600 flex items-center gap-1">
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M3 7V3h4l6 6-4 4-6-6z" />
+    <path d="M3.5 3.5h.01" />
+  </svg>
+  Tag
 </Label>
                     <Button
                       variant="outline"
