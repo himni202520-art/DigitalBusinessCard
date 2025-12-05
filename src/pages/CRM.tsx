@@ -50,9 +50,7 @@ import {
   Star,
   Edit,
   Tag,
-  Plus,
   MoreVertical,
-  X,
 } from 'lucide-react';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 
@@ -78,7 +76,14 @@ interface WhatsAppTemplate {
 const TEMPERATURE_TAGS = ['Hot', 'Warm', 'Cold'];
 const RELATIONSHIP_TAGS = ['Client', 'Prospect', 'Vendor', 'Partner', 'Investor'];
 const SOURCE_TAGS = ['QR Scan', 'Referral', 'Website', 'Social Media'];
-const STATUS_TAGS = ['New', 'In Discussion', 'Follow-up', 'Closed Won', 'Closed Lost', 'Not Interested'];
+const STATUS_TAGS = [
+  'New',
+  'In Discussion',
+  'Follow-up',
+  'Closed Won',
+  'Closed Lost',
+  'Not Interested',
+];
 const PRIMARY_TAGS = ['All', 'Hot', 'Warm', 'Cold', 'Client', 'Vendor', 'Follow-up'];
 
 export default function CRM() {
@@ -177,7 +182,7 @@ export default function CRM() {
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(contact =>
+      filtered = filtered.filter((contact) =>
         contact.name.toLowerCase().includes(query) ||
         contact.email?.toLowerCase().includes(query) ||
         contact.mobile?.toLowerCase().includes(query) ||
@@ -186,10 +191,10 @@ export default function CRM() {
     }
 
     if (activeTagFilter !== 'All') {
-      filtered = filtered.filter(contact => {
+      filtered = filtered.filter((contact) => {
         const tags = contact.tags || [];
         if (activeTagFilter.startsWith('Event:')) {
-          return tags.some(tag => tag === activeTagFilter);
+          return tags.some((tag) => tag === activeTagFilter);
         }
         return tags.includes(activeTagFilter);
       });
@@ -214,7 +219,7 @@ export default function CRM() {
           break;
       }
 
-      filtered = filtered.filter(contact => {
+      filtered = filtered.filter((contact) => {
         const createdAt = new Date(contact.created_at);
         return createdAt >= filterDate;
       });
@@ -272,7 +277,7 @@ export default function CRM() {
     if (!contact.whatsapp) return;
 
     const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
-    const activeTemplate = templates.find(t => t.is_active);
+    const activeTemplate = templates.find((t) => t.is_active);
     let message = '';
 
     if (activeTemplate) {
@@ -312,7 +317,7 @@ export default function CRM() {
     setSelectedTags(contact.tags || []);
     setCustomTag('');
 
-    const existingEventTag = (contact.tags || []).find(tag => tag.startsWith('Event:'));
+    const existingEventTag = (contact.tags || []).find((tag) => tag.startsWith('Event:'));
     if (existingEventTag) {
       setEventTagEnabled(true);
       setEventName(existingEventTag.replace('Event: ', ''));
@@ -326,7 +331,7 @@ export default function CRM() {
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
+      setSelectedTags(selectedTags.filter((t) => t !== tag));
     } else {
       setSelectedTags([...selectedTags, tag]);
     }
@@ -341,7 +346,8 @@ export default function CRM() {
       finalTags.push(customTag.trim());
     }
 
-    finalTags = finalTags.filter(tag => !tag.startsWith('Event:'));
+    // Remove old event tags
+    finalTags = finalTags.filter((tag) => !tag.startsWith('Event:'));
     if (eventTagEnabled && eventName.trim()) {
       finalTags.push(`Event: ${eventName.trim()}`);
     }
@@ -358,12 +364,8 @@ export default function CRM() {
 
       if (error) throw error;
 
-      setContacts(prev =>
-        prev.map(c =>
-          c.id === editingContact.id
-            ? { ...c, tags: finalTags }
-            : c
-        )
+      setContacts((prev) =>
+        prev.map((c) => (c.id === editingContact.id ? { ...c, tags: finalTags } : c))
       );
 
       toast({
@@ -387,7 +389,7 @@ export default function CRM() {
   };
 
   const openBulkEdit = () => {
-    const allIds = new Set(filteredContacts.map(c => c.id));
+    const allIds = new Set(filteredContacts.map((c) => c.id));
     setBulkSelectedContacts(allIds);
     setBulkTags([]);
     setBulkCustomTag('');
@@ -408,7 +410,7 @@ export default function CRM() {
 
   const toggleBulkTag = (tag: string) => {
     if (bulkTags.includes(tag)) {
-      setBulkTags(bulkTags.filter(t => t !== tag));
+      setBulkTags(bulkTags.filter((t) => t !== tag));
     } else {
       setBulkTags([...bulkTags, tag]);
     }
@@ -434,7 +436,7 @@ export default function CRM() {
 
     try {
       const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
-        const contact = contacts.find(c => c.id === contactId);
+        const contact = contacts.find((c) => c.id === contactId);
         if (!contact) return { success: false, id: contactId };
 
         const existingTags = contact.tags || [];
@@ -453,7 +455,7 @@ export default function CRM() {
       });
 
       const results = await Promise.all(updates);
-      const successCount = results.filter(r => r?.success).length;
+      const successCount = results.filter((r) => r?.success).length;
 
       const { data } = await supabase
         .from('contacts')
@@ -487,13 +489,14 @@ export default function CRM() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: 'audio/webm;codecs=opus',
       });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       transcriptRef.current = '';
 
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
@@ -522,7 +525,7 @@ export default function CRM() {
           if (isRecording && recognitionRef.current) {
             try {
               recognition.start();
-            } catch (e) {
+            } catch {
               console.log('Recognition restart failed');
             }
           }
@@ -531,7 +534,7 @@ export default function CRM() {
         try {
           recognition.start();
           recognitionRef.current = recognition;
-        } catch (error) {
+        } catch {
           console.error('Failed to start recognition');
         }
       }
@@ -548,9 +551,9 @@ export default function CRM() {
       setRecordingTime(0);
 
       recordingTimerRef.current = window.setInterval(() => {
-        setRecordingTime(prev => prev + 1);
+        setRecordingTime((prev) => prev + 1);
       }, 1000);
-    } catch (error: any) {
+    } catch {
       toast({
         title: 'Recording Failed',
         description: 'Failed to access microphone.',
@@ -572,7 +575,7 @@ export default function CRM() {
       try {
         recognitionRef.current.stop();
         recognitionRef.current = null;
-      } catch (error) {
+      } catch {
         console.error('Error stopping recognition');
       }
     }
@@ -580,9 +583,9 @@ export default function CRM() {
     if (mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const transcript = transcriptRef.current.trim();
 
@@ -619,7 +622,9 @@ export default function CRM() {
           try {
             const statusCode = error.context?.status ?? 500;
             const textContent = await error.context?.text();
-            errorMessage = `[Code: ${statusCode}] ${textContent || error.message || 'Unknown error'}`;
+            errorMessage = `[Code: ${statusCode}] ${
+              textContent || error.message || 'Unknown error'
+            }`;
           } catch {
             errorMessage = error.message || 'Failed to read response';
           }
@@ -664,9 +669,9 @@ export default function CRM() {
       return;
     }
 
-    setContacts(contacts.map(c =>
-      c.id === momContactId ? { ...c, meeting_notes: momText } : c
-    ));
+    setContacts(
+      contacts.map((c) => (c.id === momContactId ? { ...c, meeting_notes: momText } : c))
+    );
 
     toast({
       title: 'Notes Saved',
@@ -675,7 +680,7 @@ export default function CRM() {
   };
 
   const shareMoMViaWhatsApp = () => {
-    const contact = contacts.find(c => c.id === momContactId);
+    const contact = contacts.find((c) => c.id === momContactId);
     if (!contact?.whatsapp) {
       toast({
         title: 'No WhatsApp Number',
@@ -691,7 +696,7 @@ export default function CRM() {
   };
 
   const shareMoMViaEmail = () => {
-    const contact = contacts.find(c => c.id === momContactId);
+    const contact = contacts.find((c) => c.id === momContactId);
     if (!contact?.email) {
       toast({
         title: 'No Email',
@@ -738,11 +743,13 @@ export default function CRM() {
 
         if (error) throw error;
 
-        setTemplates(templates.map(t =>
-          t.id === editingTemplate.id
-            ? { ...t, name: newTemplateName, body_template: newTemplateBody }
-            : t
-        ));
+        setTemplates(
+          templates.map((t) =>
+            t.id === editingTemplate.id
+              ? { ...t, name: newTemplateName, body_template: newTemplateBody }
+              : t
+          )
+        );
 
         toast({
           title: 'Template Updated',
@@ -791,16 +798,18 @@ export default function CRM() {
 
       if (error) throw error;
 
-      setTemplates(templates.map(t => ({
-        ...t,
-        is_active: t.id === templateId,
-      })));
+      setTemplates(
+        templates.map((t) => ({
+          ...t,
+          is_active: t.id === templateId,
+        }))
+      );
 
       toast({
         title: 'Active Template Set',
         description: 'Template will be used for WhatsApp messages.',
       });
-    } catch (error: any) {
+    } catch {
       toast({
         title: 'Update Failed',
         description: 'Failed to set active template.',
@@ -818,13 +827,13 @@ export default function CRM() {
 
       if (error) throw error;
 
-      setTemplates(templates.filter(t => t.id !== templateId));
+      setTemplates(templates.filter((t) => t.id !== templateId));
 
       toast({
         title: 'Template Deleted',
         description: 'WhatsApp template deleted successfully.',
       });
-    } catch (error: any) {
+    } catch {
       toast({
         title: 'Delete Failed',
         description: 'Failed to delete template.',
@@ -857,6 +866,20 @@ export default function CRM() {
 
   const isFilterActive = activeTagFilter !== 'All' || activeDateFilter !== 'all';
 
+  // Collect all tags in the system to show category-wise filters
+  const allContactTags = Array.from(
+    new Set(contacts.flatMap((c) => c.tags || []))
+  );
+  const eventTags = allContactTags.filter((t) => t.startsWith('Event:'));
+  const otherCustomTags = allContactTags.filter(
+    (t) =>
+      !TEMPERATURE_TAGS.includes(t) &&
+      !RELATIONSHIP_TAGS.includes(t) &&
+      !SOURCE_TAGS.includes(t) &&
+      !STATUS_TAGS.includes(t) &&
+      !t.startsWith('Event:')
+  );
+
   return (
     <div className="min-h-screen bg-white">
       {/* Premium App Bar */}
@@ -875,7 +898,8 @@ export default function CRM() {
               <div>
                 <h1 className="text-xl font-bold synka-gradient-text">SYNKA CRM</h1>
                 <p className="text-xs text-slate-500">
-                  {filteredContacts.length} contact{filteredContacts.length !== 1 ? 's' : ''}
+                  {filteredContacts.length} contact
+                  {filteredContacts.length !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
@@ -921,25 +945,9 @@ export default function CRM() {
               <SheetHeader>
                 <SheetTitle>Filters</SheetTitle>
               </SheetHeader>
-              <div className="mt-6 space-y-6 overflow-y-auto max-h-[calc(85vh-180px)]">
-                <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Tags</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {['All', ...TEMPERATURE_TAGS, ...RELATIONSHIP_TAGS, ...SOURCE_TAGS, ...STATUS_TAGS].map(tag => (
-                      <Badge
-                        key={tag}
-                        variant={tempTagFilter === tag ? 'default' : 'outline'}
-                        className={`cursor-pointer px-3 py-1.5 rounded-full transition-all ${
-                          tempTagFilter === tag ? 'synka-gradient text-white border-0' : ''
-                        }`}
-                        onClick={() => setTempTagFilter(tag)}
-                      >
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
 
+              <div className="mt-6 space-y-6 overflow-y-auto max-h-[calc(85vh-180px)]">
+                {/* DATE FIRST */}
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Date Range</Label>
                   <Select value={tempDateFilter} onValueChange={setTempDateFilter}>
@@ -954,6 +962,162 @@ export default function CRM() {
                       <SelectItem value="90days">Last 90 days</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* TAGS BY CATEGORY BELOW DATE */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">Tag Filters</Label>
+                    <button
+                      type="button"
+                      className="text-xs text-slate-500 underline"
+                      onClick={() => setTempTagFilter('All')}
+                    >
+                      Clear tag filter
+                    </button>
+                  </div>
+
+                  {/* Temperature */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Temperature
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {TEMPERATURE_TAGS.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant={tempTagFilter === tag ? 'default' : 'outline'}
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag)}
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Relationship */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Relationship
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {RELATIONSHIP_TAGS.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant={tempTagFilter === tag ? 'default' : 'outline'}
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag)}
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Source */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Source
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {SOURCE_TAGS.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant={tempTagFilter === tag ? 'default' : 'outline'}
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag)}
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Event tags (dynamic) */}
+                  {eventTags.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Events
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {eventTags.map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant={tempTagFilter === tag ? 'default' : 'outline'}
+                            className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                              tempTagFilter === tag
+                                ? 'synka-gradient text-white border-0'
+                                : ''
+                            }`}
+                            onClick={() => setTempTagFilter(tag)}
+                          >
+                            {tag.replace('Event: ', '')}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Status
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {STATUS_TAGS.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant={tempTagFilter === tag ? 'default' : 'outline'}
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag)}
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Custom / Other */}
+                  {otherCustomTags.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Other Tags
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {otherCustomTags.map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant={tempTagFilter === tag ? 'default' : 'outline'}
+                            className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                              tempTagFilter === tag
+                                ? 'synka-gradient text-white border-0'
+                                : ''
+                            }`}
+                            onClick={() => setTempTagFilter(tag)}
+                          >
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -977,15 +1141,17 @@ export default function CRM() {
         </div>
       </div>
 
-      {/* Primary Tags Horizontal Scroll */}
+      {/* Primary quick tags */}
       <div className="sticky top-[137px] z-30 bg-white border-b border-slate-100 px-4 py-3">
         <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar">
-          {PRIMARY_TAGS.map(tag => (
+          {PRIMARY_TAGS.map((tag) => (
             <Badge
               key={tag}
               variant={activeTagFilter === tag ? 'default' : 'outline'}
               className={`cursor-pointer px-4 py-2 rounded-full whitespace-nowrap transition-all shrink-0 ${
-                activeTagFilter === tag ? 'synka-gradient text-white border-0' : 'border-slate-200'
+                activeTagFilter === tag
+                  ? 'synka-gradient text-white border-0'
+                  : 'border-slate-200'
               }`}
               onClick={() => setActiveTagFilter(tag)}
             >
@@ -1024,7 +1190,10 @@ export default function CRM() {
               <p className="text-slate-600 mb-6">
                 Share your business card to start collecting contacts
               </p>
-              <Button onClick={() => navigate('/my-card')} className="synka-gradient ripple-effect">
+              <Button
+                onClick={() => navigate('/my-card')}
+                className="synka-gradient ripple-effect"
+              >
                 View My Card
               </Button>
             </Card>
@@ -1041,7 +1210,7 @@ export default function CRM() {
                     contact.tags || []
                   )}`}
                 >
-                  {/* Top Row: Name + Tags + Date + Menu */}
+                  {/* Top Row: name + tags + date + menu */}
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex-1 min-w-0">
                       <h3 className="text-[15px] font-semibold text-slate-900 mb-1 truncate">
@@ -1052,13 +1221,18 @@ export default function CRM() {
                           <Badge
                             key={idx}
                             variant="outline"
-                            className={`text-[10px] px-2 py-[3px] rounded-full ${getTagColor(tag)}`}
+                            className={`text-[10px] px-2 py-[3px] rounded-full ${getTagColor(
+                              tag
+                            )}`}
                           >
                             {tag.startsWith('Event:') ? tag.replace('Event: ', '') : tag}
                           </Badge>
                         ))}
                         {(contact.tags || []).length > 3 && (
-                          <Badge variant="outline" className="text-[10px] px-2 py-[3px] rounded-full bg-slate-50">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-2 py-[3px] rounded-full bg-slate-50"
+                          >
                             +{(contact.tags || []).length - 3}
                           </Badge>
                         )}
@@ -1079,7 +1253,7 @@ export default function CRM() {
                     </div>
                   </div>
 
-                  {/* Info + Icon Actions */}
+                  {/* Info + icon actions */}
                   <div className="space-y-1.5">
                     {contact.email && (
                       <div className="flex items-center gap-2 text-[12px] text-slate-600">
@@ -1109,7 +1283,7 @@ export default function CRM() {
                       )}
 
                       <div className="flex items-center gap-1.5">
-                        {/* Record icon */}
+                        {/* Record */}
                         {recordingContact?.id === contact.id ? (
                           <button
                             type="button"
@@ -1136,7 +1310,7 @@ export default function CRM() {
                           </button>
                         )}
 
-                        {/* WhatsApp icon */}
+                        {/* WhatsApp */}
                         {contact.whatsapp && (
                           <button
                             type="button"
@@ -1148,7 +1322,7 @@ export default function CRM() {
                           </button>
                         )}
 
-                        {/* LinkedIn icon */}
+                        {/* LinkedIn */}
                         {contact.linkedin_url && (
                           <IconCircleButton
                             onClick={() => handleLinkedIn(contact.linkedin_url!)}
@@ -1158,7 +1332,7 @@ export default function CRM() {
                           </IconCircleButton>
                         )}
 
-                        {/* Save icon */}
+                        {/* Save */}
                         <IconCircleButton
                           onClick={() => handleSaveContact(contact)}
                           ariaLabel="Download vCard"
@@ -1183,15 +1357,18 @@ export default function CRM() {
             <DialogTitle>Edit Tags</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
+            {/* Temperature */}
             <div className="space-y-3">
               <Label className="text-sm font-semibold">Temperature</Label>
               <div className="flex flex-wrap gap-2">
-                {TEMPERATURE_TAGS.map(tag => (
+                {TEMPERATURE_TAGS.map((tag) => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
                     className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      selectedTags.includes(tag)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
                     }`}
                     onClick={() => toggleTag(tag)}
                   >
@@ -1201,15 +1378,18 @@ export default function CRM() {
               </div>
             </div>
 
+            {/* Relationship */}
             <div className="space-y-3">
               <Label className="text-sm font-semibold">Relationship</Label>
               <div className="flex flex-wrap gap-2">
-                {RELATIONSHIP_TAGS.map(tag => (
+                {RELATIONSHIP_TAGS.map((tag) => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
                     className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      selectedTags.includes(tag)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
                     }`}
                     onClick={() => toggleTag(tag)}
                   >
@@ -1219,15 +1399,18 @@ export default function CRM() {
               </div>
             </div>
 
+            {/* Source */}
             <div className="space-y-3">
               <Label className="text-sm font-semibold">Source</Label>
               <div className="flex flex-wrap gap-2">
-                {SOURCE_TAGS.map(tag => (
+                {SOURCE_TAGS.map((tag) => (
                   <Badge
                     key={tag}
                     variant={selectedTags.includes(tag) ? 'default' : 'outline'}
                     className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                      selectedTags.includes(tag)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
                     }`}
                     onClick={() => toggleTag(tag)}
                   >
@@ -1237,24 +1420,7 @@ export default function CRM() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <Label className="text-sm font-semibold">Status</Label>
-              <div className="flex flex-wrap gap-2">
-                {STATUS_TAGS.map(tag => (
-                  <Badge
-                    key={tag}
-                    variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                      selectedTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
-                    }`}
-                    onClick={() => toggleTag(tag)}
-                  >
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
+            {/* Event just below Source */}
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -1262,31 +1428,59 @@ export default function CRM() {
                   checked={eventTagEnabled}
                   onCheckedChange={(checked) => setEventTagEnabled(checked as boolean)}
                 />
-                <Label htmlFor="event-tag" className="text-sm font-semibold cursor-pointer">
+                <Label
+                  htmlFor="event-tag"
+                  className="text-sm font-semibold cursor-pointer"
+                >
                   Event
                 </Label>
               </div>
               {eventTagEnabled && (
                 <Input
-                  placeholder="Enter event name..."
+                  placeholder="Enter event name (e.g. Diwali Expo)..."
                   value={eventName}
                   onChange={(e) => setEventName(e.target.value)}
-                  className="rounded-xl animate-slide-up"
+                  className="rounded-xl"
                 />
               )}
             </div>
 
+            {/* Status */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Status</Label>
+              <div className="flex flex-wrap gap-2">
+                {STATUS_TAGS.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant={selectedTags.includes(tag) ? 'default' : 'outline'}
+                    className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                      selectedTags.includes(tag)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
+                    }`}
+                    onClick={() => toggleTag(tag)}
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Tag (for anything extra like "Happy", "Bharat" etc.) */}
             <div className="space-y-3">
               <Label className="text-sm font-semibold">Custom Tag</Label>
               <Input
-                placeholder="Enter custom tag..."
+                placeholder="Enter custom tag (e.g. Bharat, Happy)..."
                 value={customTag}
                 onChange={(e) => setCustomTag(e.target.value)}
                 className="rounded-xl"
               />
             </div>
 
-            <Button onClick={handleSaveTags} className="w-full rounded-xl synka-gradient ripple-effect">
+            <Button
+              onClick={handleSaveTags}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
               <Tag className="w-4 h-4 mr-2" />
               Save Tags
             </Button>
@@ -1302,22 +1496,32 @@ export default function CRM() {
           </DialogHeader>
           <div className="space-y-6">
             <p className="text-sm text-slate-600">
-              {bulkSelectedContacts.size} contact{bulkSelectedContacts.size !== 1 ? 's' : ''} selected
+              {bulkSelectedContacts.size} contact
+              {bulkSelectedContacts.size !== 1 ? 's' : ''} selected
             </p>
 
             <div className="space-y-2 max-h-48 overflow-y-auto border rounded-2xl p-3">
-              {filteredContacts.map(contact => (
-                <div key={contact.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl">
+              {filteredContacts.map((contact) => (
+                <div
+                  key={contact.id}
+                  className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl"
+                >
                   <Checkbox
                     checked={bulkSelectedContacts.has(contact.id)}
                     onCheckedChange={() => toggleBulkContact(contact.id)}
                   />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{contact.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{contact.email || contact.mobile}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {contact.email || contact.mobile}
+                    </p>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {(contact.tags || []).map((tag, idx) => (
-                        <Badge key={idx} variant="outline" className="text-[9px] px-1.5 py-0 rounded-full">
+                        <Badge
+                          key={idx}
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 rounded-full"
+                        >
                           {tag}
                         </Badge>
                       ))}
@@ -1328,15 +1532,18 @@ export default function CRM() {
             </div>
 
             <div className="space-y-4">
+              {/* Temperature */}
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Temperature</Label>
                 <div className="flex flex-wrap gap-2">
-                  {TEMPERATURE_TAGS.map(tag => (
+                  {TEMPERATURE_TAGS.map((tag) => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
                       className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                        bulkTags.includes(tag)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
                       }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
@@ -1346,15 +1553,18 @@ export default function CRM() {
                 </div>
               </div>
 
+              {/* Relationship */}
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Relationship</Label>
                 <div className="flex flex-wrap gap-2">
-                  {RELATIONSHIP_TAGS.map(tag => (
+                  {RELATIONSHIP_TAGS.map((tag) => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
                       className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                        bulkTags.includes(tag)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
                       }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
@@ -1364,15 +1574,18 @@ export default function CRM() {
                 </div>
               </div>
 
+              {/* Source */}
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Source</Label>
                 <div className="flex flex-wrap gap-2">
-                  {SOURCE_TAGS.map(tag => (
+                  {SOURCE_TAGS.map((tag) => (
                     <Badge
                       key={tag}
                       variant={bulkTags.includes(tag) ? 'default' : 'outline'}
                       className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
+                        bulkTags.includes(tag)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
                       }`}
                       onClick={() => toggleBulkTag(tag)}
                     >
@@ -1382,24 +1595,7 @@ export default function CRM() {
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold">Status</Label>
-                <div className="flex flex-wrap gap-2">
-                  {STATUS_TAGS.map(tag => (
-                    <Badge
-                      key={tag}
-                      variant={bulkTags.includes(tag) ? 'default' : 'outline'}
-                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
-                        bulkTags.includes(tag) ? 'synka-gradient text-white border-0' : ''
-                      }`}
-                      onClick={() => toggleBulkTag(tag)}
-                    >
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
+              {/* Event */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -1407,7 +1603,10 @@ export default function CRM() {
                     checked={bulkEventEnabled}
                     onCheckedChange={(checked) => setBulkEventEnabled(checked as boolean)}
                   />
-                  <Label htmlFor="bulk-event-tag" className="text-sm font-semibold cursor-pointer">
+                  <Label
+                    htmlFor="bulk-event-tag"
+                    className="text-sm font-semibold cursor-pointer"
+                  >
                     Event
                   </Label>
                 </div>
@@ -1421,6 +1620,28 @@ export default function CRM() {
                 )}
               </div>
 
+              {/* Status */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Status</Label>
+                <div className="flex flex-wrap gap-2">
+                  {STATUS_TAGS.map((tag) => (
+                    <Badge
+                      key={tag}
+                      variant={bulkTags.includes(tag) ? 'default' : 'outline'}
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
+                      }`}
+                      onClick={() => toggleBulkTag(tag)}
+                    >
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom */}
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Custom Tag</Label>
                 <Input
@@ -1432,7 +1653,10 @@ export default function CRM() {
               </div>
             </div>
 
-            <Button onClick={handleBulkApply} className="w-full rounded-xl synka-gradient ripple-effect">
+            <Button
+              onClick={handleBulkApply}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
               Apply to Selected Contacts
             </Button>
           </div>
@@ -1444,7 +1668,7 @@ export default function CRM() {
         <DialogContent className="max-w-2xl rounded-3xl">
           <DialogHeader>
             <DialogTitle>
-              Minutes of Meeting - {contacts.find(c => c.id === momContactId)?.name}
+              Minutes of Meeting - {contacts.find((c) => c.id === momContactId)?.name}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -1503,14 +1727,16 @@ export default function CRM() {
             {templates.length > 0 && (
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Saved Templates</Label>
-                {templates.map(template => (
+                {templates.map((template) => (
                   <Card key={template.id} className="p-4 rounded-2xl premium-shadow">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2">
                           <h4 className="font-semibold text-sm">{template.name}</h4>
                           {template.is_active && (
-                            <Badge className="text-xs synka-gradient border-0">Active</Badge>
+                            <Badge className="text-xs synka-gradient border-0">
+                              Active
+                            </Badge>
                           )}
                         </div>
                         <p className="text-xs text-slate-600 line-clamp-2">
@@ -1574,7 +1800,8 @@ export default function CRM() {
                   className="rounded-xl"
                 />
                 <p className="text-xs text-slate-500">
-                  Use: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{my_name}}'}</code>
+                  Use: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>,{' '}
+                  <code>{'{{my_name}}'}</code>
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -1606,7 +1833,7 @@ export default function CRM() {
   );
 }
 
-/** Circular icon button used for LinkedIn / Save */
+/** small circular icon button for LinkedIn / Save */
 function IconCircleButton({
   children,
   onClick,
