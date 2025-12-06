@@ -12,11 +12,22 @@ import { supabase } from '@/lib/supabase';
 
 export function AuthSection() {
   const [isLogin, setIsLogin] = useState(true);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+
   const [loading, setLoading] = useState(false);
+
+  // forgot / reset password state
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetStep, setResetStep] = useState<'request' | 'verify'>('request');
+  const [resetOtp, setResetOtp] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+
   const { toast } = useToast();
   const { user, login, logout } = useAuth();
   const navigate = useNavigate();
@@ -203,6 +214,73 @@ export function AuthSection() {
     }
   };
 
+  const handleSendResetOtp = async () => {
+    if (!email) {
+      toast({
+        title: 'Email Required',
+        description: 'Enter your email above first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await authService.sendPasswordResetOtp(email);
+      setResetStep('verify');
+      toast({
+        title: 'Reset Code Sent',
+        description: 'Check your email for the password reset code.',
+      });
+    } catch (error: any) {
+      console.error('Reset OTP send error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send reset code.',
+        variant: 'destructive',
+      });
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleVerifyReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email || !resetOtp || !resetNewPassword) {
+      toast({
+        title: 'Missing Fields',
+        description: 'Please fill in email, code and new password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await authService.verifyPasswordResetOtp(email, resetOtp, resetNewPassword);
+      toast({
+        title: 'Password Updated',
+        description: 'You can now log in with your new password.',
+      });
+
+      // reset state and close section
+      setShowResetPassword(false);
+      setResetStep('request');
+      setResetOtp('');
+      setResetNewPassword('');
+    } catch (error: any) {
+      console.error('Reset verify error:', error);
+      toast({
+        title: 'Reset Failed',
+        description: error.message || 'Please check the code and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   if (user) {
     return (
       <Card className="p-4 card-shadow bg-card">
@@ -229,9 +307,11 @@ export function AuthSection() {
             setIsLogin(true);
             setOtpSent(false);
             setOtp('');
+            setShowResetPassword(false);
+            setResetStep('request');
           }}
           size="sm"
-          disabled={loading}
+          disabled={loading || resetLoading}
         >
           Sign In
         </Button>
@@ -241,54 +321,146 @@ export function AuthSection() {
             setIsLogin(false);
             setOtpSent(false);
             setOtp('');
+            setShowResetPassword(false);
+            setResetStep('request');
           }}
           size="sm"
-          disabled={loading}
+          disabled={loading || resetLoading}
         >
           Sign Up
         </Button>
       </div>
 
       {isLogin ? (
-        <form onSubmit={handleSignIn} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="auth-email">Email</Label>
-            <Input
-              id="auth-email"
-              type="email"
-              placeholder="your@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-            />
-          </div>
+        <>
+          <form onSubmit={handleSignIn} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="auth-email">Email</Label>
+              <Input
+                id="auth-email"
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading || resetLoading}
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="auth-password">Password</Label>
-            <Input
-              id="auth-password"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={loading}
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="auth-password">Password</Label>
+              <Input
+                id="auth-password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading || resetLoading}
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowResetPassword((v) => !v);
+                    setResetStep('request');
+                  }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            </div>
 
-          <Button type="submit" className="w-full gradient-bg" disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Signing In...
-              </>
-            ) : (
-              <>
-                <LogIn className="w-4 h-4 mr-2" />
-                Sign In
-              </>
-            )}
-          </Button>
-        </form>
+            <Button
+              type="submit"
+              className="w-full gradient-bg"
+              disabled={loading || resetLoading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Signing In...
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Sign In
+                </>
+              )}
+            </Button>
+          </form>
+
+          {showResetPassword && (
+            <div className="mt-4 space-y-3 rounded-lg border border-dashed border-muted-foreground/30 p-3 bg-muted/40">
+              {resetStep === 'request' ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Enter your email above and we’ll send you a 6-digit code to reset
+                    your password.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleSendResetOtp}
+                    disabled={resetLoading || !email}
+                  >
+                    {resetLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Sending Code...
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4 mr-2" />
+                        Send Reset Code
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <form onSubmit={handleVerifyReset} className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="reset-otp">Reset Code</Label>
+                    <Input
+                      id="reset-otp"
+                      type="text"
+                      placeholder="Enter 6-digit code"
+                      value={resetOtp}
+                      onChange={(e) => setResetOtp(e.target.value)}
+                      disabled={resetLoading}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reset-new-password">New Password</Label>
+                    <Input
+                      id="reset-new-password"
+                      type="password"
+                      placeholder="Enter new password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      disabled={resetLoading}
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="w-full"
+                    disabled={resetLoading}
+                  >
+                    {resetLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      'Update Password'
+                    )}
+                  </Button>
+                </form>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <form onSubmit={handleSignUp} className="space-y-4">
           <div className="space-y-2">
@@ -349,7 +521,11 @@ export function AuthSection() {
                 />
               </div>
 
-              <Button type="submit" className="w-full gradient-bg" disabled={loading}>
+              <Button
+                type="submit"
+                className="w-full gradient-bg"
+                disabled={loading}
+              >
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
