@@ -22,55 +22,49 @@ export class AuthService {
   }
 
   /**
-   * Send a 6-digit OTP to the given email.
-   * Supabase must be configured to use Email OTP (not magic link)
-   * in Auth → Providers → Email.
+   * Send a 6-digit OTP to the given email for SIGN UP.
    */
   async sendOtp(email: string) {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        shouldCreateUser: true, // create user on first OTP
+        shouldCreateUser: true,
       },
     });
-
     if (error) throw error;
   }
 
   /**
-   * Verify the OTP and then set a password + username.
+   * Verify signup OTP and set initial password + username.
    */
   async verifyOtpAndSetPassword(email: string, token: string, password: string) {
-    // 1) Verify OTP (email code)
     const { data, error } = await supabase.auth.verifyOtp({
       email,
       token,
-      type: 'email', // IMPORTANT: email OTP, not magic link
+      type: 'email', // email OTP (NOT magic link)
     });
-
     if (error) throw error;
     if (!data.user) throw new Error('OTP verification failed');
 
-    // 2) Set password + username
     const username = email.split('@')[0];
 
     const { error: updateError } = await supabase.auth.updateUser({
       password,
       data: { username },
     });
-
     if (updateError) throw updateError;
 
-    // 3) Return latest user
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) throw new Error('User not found after update');
-
     return user;
   }
 
+  /**
+   * Normal sign-in with email + password.
+   */
   async signInWithPassword(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -79,6 +73,48 @@ export class AuthService {
     if (error) throw error;
     if (!data.user) throw new Error('Sign in failed');
     return data.user;
+  }
+
+  /**
+   * Send a password reset OTP to the user's email.
+   * (Reset password email template should show {{ .Token }})
+   */
+  async sendPasswordResetOtp(email: string) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  }
+
+  /**
+   * Verify password reset OTP and update the password.
+   */
+  async verifyPasswordResetOtp(
+    email: string,
+    token: string,
+    newPassword: string
+  ) {
+    // 1) Verify recovery OTP
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'recovery',
+    });
+    if (error) throw error;
+    if (!data.session) {
+      throw new Error('Recovery session not created');
+    }
+
+    // 2) Update password for the recovered user
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (updateError) throw updateError;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) throw new Error('User not found after password reset');
+    return user;
   }
 
   async signOut() {
