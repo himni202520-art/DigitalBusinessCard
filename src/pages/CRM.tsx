@@ -1,877 +1,2917 @@
-/* eslint-disable @next/next/no-img-element */
-/**
- * crm.tsx
- * Drop-in replacement for your CRM page. Place under /src/pages/crm.tsx
- *
- * - Tailwind classes used throughout. Adapt if not using Tailwind.
- * - Replace SAMPLE_CONTACTS and fetchContacts() with your real backend (Supabase/API).
- * - External libs: react-swipeable, lucide-react, papaparse
- */
-
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSwipeable } from "react-swipeable";
+import { useState, useEffect, useRef, MouseEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/use-auth';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
+import { downloadVCard } from '@/lib/vcard';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import {
+  ArrowLeft,
+  Search,
+  Filter,
   Phone,
-  MessageCircle,
   Mail,
   Linkedin,
-  Tag as TagIcon,
-  Clock,
-  Trash2,
-  Edit2,
-  X as XIcon,
-  Search,
-  Plus,
+  MessageCircle,
   Download,
-  ChevronLeft,
-  ChevronRight,
-  MoreHorizontal,
-} from "lucide-react";
-import Papa from "papaparse";
+  Loader2,
+  User,
+  Mic,
+  Square,
+  Send,
+  FileText,
+  Trash2,
+  Star,
+  Edit,
+  Tag,
+  MoreVertical,
+  Plus,
+  X,
+} from 'lucide-react';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
-/* ----------------------
-  Types
-   ---------------------- */
-type Contact = {
-  id: number;
+interface Contact {
+  id: string;
   name: string;
-  company?: string | null;
-  designation?: string | null;
-  phone?: string | null;
-  whatsapp?: string | null;
-  email?: string | null;
-  linkedin?: string | null;
-  notes?: string | null;
-  avatar?: string | null;
+  email?: string;
+  mobile?: string;
+  linkedin_url?: string;
+  whatsapp?: string;
+  created_at: string;
   tags?: string[];
-  createdAt?: string | null; // ISO
-};
+  meeting_notes?: string;
+  synka_card_url?: string; // optional digital card URL
+}
 
-type SortKey = "name" | "createdAt" | "company";
+interface WhatsAppTemplate {
+  id: string;
+  name: string;
+  body_template: string;
+  is_active: boolean;
+}
 
-/* ----------------------
-  Sample data - replace with API / Supabase fetch
-   ---------------------- */
-const SAMPLE_CONTACTS: Contact[] = [
-  {
-    id: 1,
-    name: "Aisha Khan",
-    company: "Orbit Labs",
-    designation: "Product Lead",
-    phone: "+91 98765 43210",
-    whatsapp: "+91 98765 43210",
-    email: "aisha@orbit.com",
-    linkedin: "https://www.linkedin.com/in/aishak/",
-    notes: "Met at trade show. Interested in corporate travel solution.",
-    avatar: null,
-    tags: ["Lead", "TradeShow"],
-    createdAt: "2025-11-20T10:30:00.000Z",
-  },
-  {
-    id: 2,
-    name: "Rohit Sharma",
-    company: "",
-    designation: "",
-    phone: null,
-    whatsapp: null,
-    email: null,
-    linkedin: null,
-    notes: "No extra info.",
-    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=600&q=80",
-    tags: [],
-    createdAt: "2025-10-05T15:45:00.000Z",
-  },
-  // add more sample contacts if you want for development
+interface TagDef {
+  id: string;
+  name: string;
+  group: string;
+  user_id: string | null;
+}
+
+interface ContactNote {
+  id: string;
+  contact_id: string;
+  owner_user_id: string;
+  note: string;
+  created_at: string;
+}
+
+const DEFAULT_TEMPERATURE_TAGS = ['Hot', 'Warm', 'Cold'];
+const DEFAULT_RELATIONSHIP_TAGS = [
+  'Client',
+  'Prospect',
+  'Vendor',
+  'Partner',
+  'Investor',
+];
+const DEFAULT_SOURCE_TAGS = ['QR Scan', 'Referral', 'Website', 'Social Media'];
+const DEFAULT_STATUS_TAGS = [
+  'New',
+  'In Discussion',
+  'Follow-up',
+  'Closed Won',
+  'Closed Lost',
+  'Not Interested',
+];
+const DEFAULT_PRIMARY_TAGS = [
+  'All',
+  'Hot',
+  'Warm',
+  'Cold',
+  'Client',
+  'Vendor',
+  'Follow-up',
 ];
 
-/* ----------------------
-  Utilities
-   ---------------------- */
-const formatCreatedAt = (iso?: string | null) => {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  } catch {
-    return iso;
-  }
-};
+const DATE_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All time' },
+  { value: 'today', label: 'Today' },
+  { value: '7days', label: 'Last 7 days' },
+  { value: '30days', label: 'Last 30 days' },
+  { value: '90days', label: 'Last 90 days' },
+];
 
-const debounce = <T extends (...args: any[]) => void>(fn: T, wait = 250) => {
-  let t: any;
-  return (...args: Parameters<T>) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), wait);
-  };
-};
-
-/* ----------------------
-  Main component
-   ---------------------- */
-export default function CRMPage(): JSX.Element {
-  // Data & UI state
+export default function CRM() {
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [query, setQuery] = useState("");
-  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [customTag, setCustomTag] = useState('');
+  const [eventTagEnabled, setEventTagEnabled] = useState(false);
+  const [eventName, setEventName] = useState('');
+  const [bulkSelectedContacts, setBulkSelectedContacts] =
+    useState<Set<string>>(new Set());
+  const [bulkTags, setBulkTags] = useState<string[]>([]);
+  const [bulkCustomTag, setBulkCustomTag] = useState('');
+  const [bulkEventEnabled, setBulkEventEnabled] = useState(false);
+  const [bulkEventName, setBulkEventName] = useState('');
 
-  // pagination
-  const [page, setPage] = useState(1);
-  const pageSize = 12;
+  const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
+  const [activeDateFilter, setActiveDateFilter] = useState<string>('all');
+  const [tempTagFilter, setTempTagFilter] = useState<string>('All');
+  const [tempDateFilter, setTempDateFilter] = useState<string>('all');
 
-  // modals/drawers
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
-  const [tagEditorFor, setTagEditorFor] = useState<number | null>(null);
-  const [notesFor, setNotesFor] = useState<number | null>(null);
-  const [detailFor, setDetailFor] = useState<number | null>(null);
-  const [editFor, setEditFor] = useState<number | null>(null);
+  // Tag definitions (per user, from Supabase)
+  const [tagDefs, setTagDefs] = useState<TagDef[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
 
-  // UI refs
-  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [newTemperatureTag, setNewTemperatureTag] = useState('');
+  const [newRelationshipTag, setNewRelationshipTag] = useState('');
+  const [newSourceTag, setNewSourceTag] = useState('');
+  const [newStatusTag, setNewStatusTag] = useState('');
 
-  // load data (replace with your API call)
+  // Quick filter bar
+  const [primaryQuickTags, setPrimaryQuickTags] =
+    useState<string[]>(DEFAULT_PRIMARY_TAGS);
+  const [quickTagModalOpen, setQuickTagModalOpen] = useState(false);
+  const [quickTagSelection, setQuickTagSelection] = useState<Set<string>>(
+    () => new Set(DEFAULT_PRIMARY_TAGS.filter((t) => t !== 'All'))
+  );
+
+  // Infinite scroll
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // Recording + MoM
+  const [recordingContact, setRecordingContact] = useState<Contact | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isProcessingMoM, setIsProcessingMoM] = useState(false);
+  const [momModalOpen, setMomModalOpen] = useState(false);
+  const [momText, setMomText] = useState('');
+  const [momContactId, setMomContactId] = useState<string>('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef<string>('');
+
+  // WhatsApp templates
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] =
+    useState<WhatsAppTemplate | null>(null);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateBody, setNewTemplateBody] = useState('');
+
+  // Notes
+  const [notesModalOpen, setNotesModalOpen] = useState(false);
+  const [notesContact, setNotesContact] = useState<Contact | null>(null);
+  const [contactNotes, setContactNotes] = useState<ContactNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+
+  // Full-screen contact view
+  const [contactDetailOpen, setContactDetailOpen] = useState(false);
+  const [detailContact, setDetailContact] = useState<Contact | null>(null);
+
+  const { user, loading } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // Derived tag groups
+  const temperatureTags = tagDefs.filter((t) => t.group === 'Temperature');
+  const relationshipTags = tagDefs.filter((t) => t.group === 'Relationship');
+  const sourceTags = tagDefs.filter((t) => t.group === 'Source');
+  const statusTags = tagDefs.filter((t) => t.group === 'Status');
+  const eventTags = tagDefs.filter((t) => t.group === 'Event');
+  const customTags = tagDefs.filter((t) => t.group === 'Custom');
+
+  // All available tags as strings for quick filter config
+  const allAvailableTagStrings = Array.from(
+    new Set(
+      tagDefs.map((t) =>
+        t.group === 'Event' ? `Event: ${t.name}` : t.name
+      )
+    )
+  ).sort();
+
   useEffect(() => {
-    // TODO: replace fetchContacts() with your API/Supabase call
-    const fetchContacts = async () => {
-      // Simulate async fetch
-      await new Promise((r) => setTimeout(r, 80));
-      setContacts(SAMPLE_CONTACTS);
+    if (!loading && !user) {
+      navigate('/');
+    }
+  }, [user, loading, navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadContacts = async () => {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setContacts(data);
+      }
+      setIsLoading(false);
     };
-    fetchContacts();
-  }, []);
 
-  // Derived lists (search, filter, sort)
-  const allTags = useMemo(() => {
-    const s = new Set<string>();
-    contacts.forEach((c) => (c.tags || []).forEach((t) => s.add(t)));
-    return Array.from(s).sort();
-  }, [contacts]);
+    loadContacts();
+  }, [user]);
 
-  const filteredSorted = useMemo(() => {
-    let list = contacts.slice();
+  useEffect(() => {
+    if (!user) return;
 
-    // search across name, company, designation, email
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter((c) => {
-        return (
-          (c.name || "").toLowerCase().includes(q) ||
-          (c.company || "").toLowerCase().includes(q) ||
-          (c.designation || "").toLowerCase().includes(q) ||
-          (c.email || "").toLowerCase().includes(q)
-        );
+    const loadTemplates = async () => {
+      const { data, error } = await supabase
+        .from('whatsapp_templates')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setTemplates(data);
+      }
+    };
+
+    loadTemplates();
+  }, [user]);
+
+  // Seed default tags per user + load tags from Supabase
+  useEffect(() => {
+    if (!user) return;
+
+    const seedDefaultTagsForUser = async (userId: string) => {
+      try {
+        const promises: Promise<any>[] = [];
+
+        DEFAULT_TEMPERATURE_TAGS.forEach((name) => {
+          promises.push(
+            supabase.rpc('add_tag', {
+              p_group_name: 'Temperature',
+              p_tag_name: name,
+              p_user_id: userId,
+            })
+          );
+        });
+
+        DEFAULT_RELATIONSHIP_TAGS.forEach((name) => {
+          promises.push(
+            supabase.rpc('add_tag', {
+              p_group_name: 'Relationship',
+              p_tag_name: name,
+              p_user_id: userId,
+            })
+          );
+        });
+
+        DEFAULT_SOURCE_TAGS.forEach((name) => {
+          promises.push(
+            supabase.rpc('add_tag', {
+              p_group_name: 'Source',
+              p_tag_name: name,
+              p_user_id: userId,
+            })
+          );
+        });
+
+        DEFAULT_STATUS_TAGS.forEach((name) => {
+          promises.push(
+            supabase.rpc('add_tag', {
+              p_group_name: 'Status',
+              p_tag_name: name,
+              p_user_id: userId,
+            })
+          );
+        });
+
+        await Promise.all(promises);
+      } catch (error) {
+        console.error('Error seeding default tags', error);
+      }
+    };
+
+    const loadTagsForUser = async () => {
+      if (!user) return;
+      setTagsLoading(true);
+      try {
+        let { data, error } = await supabase
+          .from('tags_grouped')
+          .select('tag_id, tag_name, group_name, user_id')
+          .eq('user_id', user.id)
+          .order('group_name', { ascending: true })
+          .order('tag_name', { ascending: true });
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+          await seedDefaultTagsForUser(user.id);
+          const reload = await supabase
+            .from('tags_grouped')
+            .select('tag_id, tag_name, group_name, user_id')
+            .eq('user_id', user.id)
+            .order('group_name', { ascending: true })
+            .order('tag_name', { ascending: true });
+          if (reload.error) throw reload.error;
+          data = reload.data;
+        }
+
+        if (data) {
+          const mapped: TagDef[] = data.map((row: any) => ({
+            id: row.tag_id,
+            name: row.tag_name,
+            group: row.group_name,
+            user_id: row.user_id,
+          }));
+          setTagDefs(mapped);
+        }
+      } catch (error) {
+        console.error('Failed to load tags', error);
+        toast({
+          title: 'Tags load failed',
+          description: 'Could not load tags from server.',
+          variant: 'destructive',
+        });
+      } finally {
+        setTagsLoading(false);
+      }
+    };
+
+    loadTagsForUser();
+  }, [user, toast]);
+
+  // Apply search + tag + date filters
+  useEffect(() => {
+    let filtered = [...contacts];
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((contact) =>
+        contact.name.toLowerCase().includes(query) ||
+        contact.email?.toLowerCase().includes(query) ||
+        contact.mobile?.toLowerCase().includes(query) ||
+        contact.whatsapp?.toLowerCase().includes(query)
+      );
+    }
+
+    if (activeTagFilter !== 'All') {
+      filtered = filtered.filter((contact) => {
+        const tags = contact.tags || [];
+        if (activeTagFilter.startsWith('Event:')) {
+          return tags.some((tag) => tag === activeTagFilter);
+        }
+        return tags.includes(activeTagFilter);
       });
     }
 
-    if (activeTagFilter) {
-      list = list.filter((c) => (c.tags || []).includes(activeTagFilter));
+    if (activeDateFilter !== 'all') {
+      const now = new Date();
+      const filterDate = new Date();
+
+      switch (activeDateFilter) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case '7days':
+          filterDate.setDate(now.getDate() - 7);
+          break;
+        case '30days':
+          filterDate.setDate(now.getDate() - 30);
+          break;
+        case '90days':
+          filterDate.setDate(now.getDate() - 90);
+          break;
+      }
+
+      filtered = filtered.filter((contact) => {
+        const createdAt = new Date(contact.created_at);
+        return createdAt >= filterDate;
+      });
     }
 
-    // sort
-    list.sort((a, b) => {
-      let aa: string | number = "";
-      let bb: string | number = "";
-      if (sortKey === "name") {
-        aa = (a.name || "").toLowerCase();
-        bb = (b.name || "").toLowerCase();
-      } else if (sortKey === "createdAt") {
-        aa = a.createdAt ? Date.parse(a.createdAt) : 0;
-        bb = b.createdAt ? Date.parse(b.createdAt) : 0;
-      } else if (sortKey === "company") {
-        aa = (a.company || "").toLowerCase();
-        bb = (b.company || "").toLowerCase();
-      }
-      if (aa < bb) return sortDir === "asc" ? -1 : 1;
-      if (aa > bb) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
+    setFilteredContacts(filtered);
+  }, [contacts, searchQuery, activeTagFilter, activeDateFilter]);
 
-    return list;
-  }, [contacts, query, activeTagFilter, sortKey, sortDir]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / pageSize));
+  // Reset visible count when filters change
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [totalPages, page]);
+    setVisibleCount(20);
+  }, [filteredContacts.length]);
 
-  const currentPageItems = useMemo(() => {
-    const s = (page - 1) * pageSize;
-    return filteredSorted.slice(s, s + pageSize);
-  }, [filteredSorted, page]);
+  // Infinite scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      if (
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 200
+      ) {
+        setVisibleCount((prev) =>
+          prev >= filteredContacts.length ? prev : prev + 20
+        );
+      }
+    };
 
-  /* ----------------------
-    Selection / bulk actions
-     ---------------------- */
-  const toggleSelect = (id: number) => {
-    setSelectedIds((prev) => {
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [filteredContacts.length]);
+
+  // Sync quick tag selection when opening modal
+  useEffect(() => {
+    if (quickTagModalOpen) {
+      setQuickTagSelection(new Set(primaryQuickTags.filter((t) => t !== 'All')));
+    }
+  }, [quickTagModalOpen, primaryQuickTags]);
+
+  const getStatusColor = (tags: string[]) => {
+    if (tags.includes('Hot')) return 'border-l-red-500';
+    if (tags.includes('Warm')) return 'border-l-orange-500';
+    if (tags.includes('Cold')) return 'border-l-blue-500';
+    if (tags.includes('Client')) return 'border-l-green-500';
+    return 'border-l-slate-300';
+  };
+
+  const getTagColor = (tag: string) => {
+    if (tag === 'Hot') return 'bg-red-50 text-red-700 border-red-200';
+    if (tag === 'Warm') return 'bg-orange-50 text-orange-700 border-orange-200';
+    if (tag === 'Cold') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (tag === 'Client') return 'bg-green-50 text-green-700 border-green-200';
+    if (tag.startsWith('Event:'))
+      return 'bg-violet-50 text-violet-700 border-violet-200';
+    return 'bg-slate-50 text-slate-700 border-slate-200';
+  };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleCall = (mobile?: string) => {
+    if (!mobile) return;
+    window.location.href = `tel:${mobile}`;
+  };
+
+  const handleEmail = (email?: string) => {
+    if (!email) return;
+    window.location.href = `mailto:${email}`;
+  };
+
+  const handleWhatsApp = async (contact: Contact) => {
+    if (!contact.whatsapp) return;
+
+    const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
+    const activeTemplate = templates.find((t) => t.is_active);
+    let message = '';
+
+    if (activeTemplate) {
+      message = activeTemplate.body_template
+        .replace(/\{\{name\}\}/g, contact.name || '')
+        .replace(/\{\{company\}\}/g, contact.email?.split('@')[1] || '')
+        .replace(/\{\{my_name\}\}/g, user?.username || '');
+    } else {
+      message = `Hi ${contact.name}, this is ${user?.username}. Saving your contact from my digital business card.`;
+    }
+
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
+  };
+
+  const handleLinkedIn = (linkedin?: string) => {
+    if (!linkedin) return;
+    window.open(linkedin, '_blank');
+  };
+
+  const handleSaveContact = (contact: Contact) => {
+    downloadVCard({
+      name: contact.name,
+      email: contact.email,
+      mobile: contact.mobile,
+      linkedin: contact.linkedin_url,
+      whatsapp: contact.whatsapp,
+    });
+    toast({
+      title: 'Contact Saved',
+      description: `${contact.name}'s vCard has been downloaded.`,
+    });
+  };
+
+  const openEditTags = (contact: Contact) => {
+    setEditingContact(contact);
+    setSelectedTags(contact.tags || []);
+    setCustomTag('');
+
+    const existingEventTag = (contact.tags || []).find((tag) =>
+      tag.startsWith('Event:')
+    );
+    if (existingEventTag) {
+      setEventTagEnabled(true);
+      setEventName(existingEventTag.replace('Event: ', ''));
+    } else {
+      setEventTagEnabled(false);
+      setEventName('');
+    }
+
+    setTagModalOpen(true);
+  };
+
+  const toggleTag = (tagName: string) => {
+    if (selectedTags.includes(tagName)) {
+      setSelectedTags(selectedTags.filter((t) => t !== tagName));
+    } else {
+      setSelectedTags([...selectedTags, tagName]);
+    }
+  };
+
+  // Reload tags from Supabase
+  const refreshTags = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('tags_grouped')
+        .select('tag_id, tag_name, group_name, user_id')
+        .eq('user_id', user.id)
+        .order('group_name', { ascending: true })
+        .order('tag_name', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        const mapped: TagDef[] = data.map((row: any) => ({
+          id: row.tag_id,
+          name: row.tag_name,
+          group: row.group_name,
+          user_id: row.user_id,
+        }));
+        setTagDefs(mapped);
+      }
+    } catch (error) {
+      console.error('Failed to refresh tags', error);
+    }
+  };
+
+  // Add new tags to categories
+  const handleAddTemperatureTag = async () => {
+    const value = newTemperatureTag.trim();
+    if (!value || !user) return;
+    if (tagDefs.some((t) => t.group === 'Temperature' && t.name === value)) {
+      setNewTemperatureTag('');
+      return;
+    }
+    try {
+      const { error } = await supabase.rpc('add_tag', {
+        p_group_name: 'Temperature',
+        p_tag_name: value,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      setNewTemperatureTag('');
+      await refreshTags();
+    } catch (error: any) {
+      toast({
+        title: 'Add tag failed',
+        description: error.message || 'Failed to add temperature tag.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleAddRelationshipTag = async () => {
+    const value = newRelationshipTag.trim();
+    if (!value || !user) return;
+    if (tagDefs.some((t) => t.group === 'Relationship' && t.name === value)) {
+      setNewRelationshipTag('');
+      return;
+    }
+    try {
+      const { error } = await supabase.rpc('add_tag', {
+        p_group_name: 'Relationship',
+        p_tag_name: value,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      setNewRelationshipTag('');
+      await refreshTags();
+    } catch (error: any) {
+      toast({
+        title: 'Add tag failed',
+        description: error.message || 'Failed to add relationship tag.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleAddSourceTag = async () => {
+    const value = newSourceTag.trim();
+    if (!value || !user) return;
+    if (tagDefs.some((t) => t.group === 'Source' && t.name === value)) {
+      setNewSourceTag('');
+      return;
+    }
+    try {
+      const { error } = await supabase.rpc('add_tag', {
+        p_group_name: 'Source',
+        p_tag_name: value,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      setNewSourceTag('');
+      await refreshTags();
+    } catch (error: any) {
+      toast({
+        title: 'Add tag failed',
+        description: error.message || 'Failed to add source tag.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleAddStatusTag = async () => {
+    const value = newStatusTag.trim();
+    if (!value || !user) return;
+    if (tagDefs.some((t) => t.group === 'Status' && t.name === value)) {
+      setNewStatusTag('');
+      return;
+    }
+    try {
+      const { error } = await supabase.rpc('add_tag', {
+        p_group_name: 'Status',
+        p_tag_name: value,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      setNewStatusTag('');
+      await refreshTags();
+    } catch (error: any) {
+      toast({
+        title: 'Add tag failed',
+        description: error.message || 'Failed to add status tag.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Delete a category tag
+  const handleDeleteCategoryTag = async (tag: TagDef) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase.rpc('delete_tag', {
+        p_tag_id: tag.id,
+      });
+      if (error) throw error;
+
+      setTagDefs((prev) => prev.filter((t) => t.id !== tag.id));
+
+      setSelectedTags((prev) => prev.filter((t) => t !== tag.name));
+      setBulkTags((prev) => prev.filter((t) => t !== tag.name));
+      setPrimaryQuickTags((prev) =>
+        prev.filter((t) => t === 'All' || t !== tag.name)
+      );
+      if (activeTagFilter === tag.name) setActiveTagFilter('All');
+      if (tempTagFilter === tag.name) setTempTagFilter('All');
+
+      toast({
+        title: 'Tag deleted',
+        description: `"${tag.name}" removed from your tags.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Delete failed',
+        description: error.message || 'Failed to delete tag.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleSaveTags = async () => {
+    if (!editingContact || !user) return;
+
+    let finalTags = [...selectedTags];
+
+    if (customTag.trim()) {
+      finalTags.push(customTag.trim());
+    }
+
+    finalTags = finalTags.filter((tag) => !tag.startsWith('Event:'));
+    if (eventTagEnabled && eventName.trim()) {
+      finalTags.push(`Event: ${eventName.trim()}`);
+    }
+
+    try {
+      const { error } = await supabase
+        .from('contacts')
+        .update({
+          tags: finalTags,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingContact.id)
+        .eq('owner_user_id', user.id);
+
+      if (error) throw error;
+
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.id === editingContact.id ? { ...c, tags: finalTags } : c
+        )
+      );
+
+      toast({
+        title: 'Tags Updated',
+        description: 'Contact tags have been saved successfully.',
+      });
+
+      setTagModalOpen(false);
+      setEditingContact(null);
+      setSelectedTags([]);
+      setCustomTag('');
+      setEventTagEnabled(false);
+      setEventName('');
+    } catch (error: any) {
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to save tags.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const openBulkEdit = () => {
+    const allIds = new Set(filteredContacts.map((c) => c.id));
+    setBulkSelectedContacts(allIds);
+    setBulkTags([]);
+    setBulkCustomTag('');
+    setBulkEventEnabled(false);
+    setBulkEventName('');
+    setBulkEditModalOpen(true);
+  };
+
+  const toggleBulkContact = (contactId: string) => {
+    const newSet = new Set(bulkSelectedContacts);
+    if (newSet.has(contactId)) {
+      newSet.delete(contactId);
+    } else {
+      newSet.add(contactId);
+    }
+    setBulkSelectedContacts(newSet);
+  };
+
+  const toggleBulkTag = (tagName: string) => {
+    if (bulkTags.includes(tagName)) {
+      setBulkTags(bulkTags.filter((t) => t !== tagName));
+    } else {
+      setBulkTags([...bulkTags, tagName]);
+    }
+  };
+
+  const handleBulkApply = async () => {
+    if (bulkSelectedContacts.size === 0 || !user) return;
+
+    let tagsToAdd = [...bulkTags];
+    if (bulkCustomTag.trim()) tagsToAdd.push(bulkCustomTag.trim());
+    if (bulkEventEnabled && bulkEventName.trim()) {
+      tagsToAdd.push(`Event: ${bulkEventName.trim()}`);
+    }
+
+    if (tagsToAdd.length === 0) {
+      toast({
+        title: 'No Tags Selected',
+        description: 'Please select at least one tag to add.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const updates = Array.from(bulkSelectedContacts).map(async (contactId) => {
+        const contact = contacts.find((c) => c.id === contactId);
+        if (!contact) return { success: false, id: contactId };
+
+        const existingTags = contact.tags || [];
+        const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd]));
+
+        const { error } = await supabase
+          .from('contacts')
+          .update({
+            tags: mergedTags,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', contactId)
+          .eq('owner_user_id', user.id);
+
+        return { success: !error, id: contactId };
+      });
+
+      const results = await Promise.all(updates);
+      const successCount = results.filter((r) => r?.success).length;
+
+      const { data } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (data) setContacts(data);
+
+      toast({
+        title: 'Bulk Update Complete',
+        description: `Successfully updated ${successCount} contact(s).`,
+      });
+
+      setBulkEditModalOpen(false);
+      setBulkSelectedContacts(new Set());
+      setBulkTags([]);
+      setBulkCustomTag('');
+      setBulkEventEnabled(false);
+      setBulkEventName('');
+    } catch (error: any) {
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to update tags.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const startRecording = async (contact: Contact) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+      });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      transcriptRef.current = '';
+
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          let finalTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript + ' ';
+            }
+          }
+          if (finalTranscript) {
+            transcriptRef.current += finalTranscript;
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event.error !== 'no-speech') {
+            console.error('Speech recognition error:', event.error);
+          }
+        };
+
+        recognition.onend = () => {
+          if (isRecording && recognitionRef.current) {
+            try {
+              recognition.start();
+            } catch {
+              console.log('Recognition restart failed');
+            }
+          }
+        };
+
+        try {
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch {
+          console.error('Failed to start recognition');
+        }
+      }
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      setRecordingContact(contact);
+      setRecordingTime(0);
+
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+    } catch {
+      toast({
+        title: 'Recording Failed',
+        description: 'Failed to access microphone.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!mediaRecorderRef.current || !recordingContact) return;
+
+    setIsRecording(false);
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      } catch {
+        console.error('Error stopping recognition');
+      }
+    }
+
+    if (mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current.stream
+      .getTracks()
+      .forEach((track) => track.stop());
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const transcript = transcriptRef.current.trim();
+
+    if (!transcript) {
+      const defaultTranscript = `Meeting with ${recordingContact.name}. Discussion notes not captured via speech recognition. Please add notes manually.`;
+
+      toast({
+        title: 'Limited Transcription',
+        description: 'You can add notes manually in the MoM editor.',
+      });
+
+      generateMoM(defaultTranscript, recordingContact);
+      return;
+    }
+
+    generateMoM(transcript, recordingContact);
+  };
+
+  const generateMoM = async (transcript: string, contact: Contact) => {
+    setIsProcessingMoM(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-mom', {
+        body: {
+          transcript,
+          contactName: contact.name,
+          contactCompany: contact.email?.split('@')[1] || '',
+        },
+      });
+
+      if (error) {
+        let errorMessage = error.message;
+        if (error instanceof FunctionsHttpError) {
+          try {
+            const statusCode = error.context?.status ?? 500;
+            const textContent = await error.context?.text();
+            errorMessage = `[Code: ${statusCode}] ${
+              textContent || error.message || 'Unknown error'
+            }`;
+          } catch {
+            errorMessage = error.message || 'Failed to read response';
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      if (data?.mom_text) {
+        setMomText(data.mom_text);
+        setMomContactId(contact.id);
+        setMomModalOpen(true);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'MoM Generation Failed',
+        description: error.message || 'Failed to generate Minutes of Meeting.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessingMoM(false);
+      setRecordingContact(null);
+    }
+  };
+
+  const saveMoMToCRM = async () => {
+    if (!momContactId || !momText) return;
+
+    const { error } = await supabase
+      .from('contacts')
+      .update({
+        meeting_notes: momText,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', momContactId);
+
+    if (error) {
+      toast({
+        title: 'Save Failed',
+        description: 'Failed to save meeting notes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setContacts(
+      contacts.map((c) =>
+        c.id === momContactId ? { ...c, meeting_notes: momText } : c
+      )
+    );
+
+    toast({
+      title: 'Notes Saved',
+      description: 'Meeting notes saved to CRM.',
+    });
+  };
+
+  const shareMoMViaWhatsApp = () => {
+    const contact = contacts.find((c) => c.id === momContactId);
+    if (!contact?.whatsapp) {
+      toast({
+        title: 'No WhatsApp Number',
+        description: 'This contact does not have a WhatsApp number.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const cleanNumber = contact.whatsapp.replace(/[^0-9]/g, '');
+    const encodedMessage = encodeURIComponent(momText);
+    window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
+  };
+
+  const shareMoMViaEmail = () => {
+    const contact = contacts.find((c) => c.id === momContactId);
+    if (!contact?.email) {
+      toast({
+        title: 'No Email',
+        description: 'This contact does not have an email address.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const subject = encodeURIComponent('Minutes of Meeting');
+    const body = encodeURIComponent(momText);
+    window.location.href = `mailto:${contact.email}?subject=${subject}&body=${body}`;
+  };
+
+  const shareMoMViaBoth = () => {
+    shareMoMViaWhatsApp();
+    shareMoMViaEmail();
+  };
+
+  const openTemplateManager = () => {
+    setTemplateModalOpen(true);
+  };
+
+  const saveTemplate = async () => {
+    if (!newTemplateName.trim() || !newTemplateBody.trim()) {
+      toast({
+        title: 'Missing Information',
+        description: 'Please fill in template name and body.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      if (editingTemplate) {
+        const { error } = await supabase
+          .from('whatsapp_templates')
+          .update({
+            name: newTemplateName,
+            body_template: newTemplateBody,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingTemplate.id);
+
+        if (error) throw error;
+
+        setTemplates(
+          templates.map((t) =>
+            t.id === editingTemplate.id
+              ? { ...t, name: newTemplateName, body_template: newTemplateBody }
+              : t
+          )
+        );
+
+        toast({
+          title: 'Template Updated',
+          description: 'WhatsApp template updated successfully.',
+        });
+      } else {
+        const { data, error } = await supabase
+          .from('whatsapp_templates')
+          .insert({
+            user_id: user!.id,
+            name: newTemplateName,
+            body_template: newTemplateBody,
+            is_active: templates.length === 0,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setTemplates([...templates, data]);
+
+        toast({
+          title: 'Template Created',
+          description: 'WhatsApp template created successfully.',
+        });
+      }
+
+      setNewTemplateName('');
+      setNewTemplateBody('');
+      setEditingTemplate(null);
+    } catch (error: any) {
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save template.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const setActiveTemplate = async (templateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('whatsapp_templates')
+        .update({ is_active: true })
+        .eq('id', templateId);
+
+      if (error) throw error;
+
+      setTemplates(
+        templates.map((t) => ({
+          ...t,
+          is_active: t.id === templateId,
+        }))
+      );
+
+      toast({
+        title: 'Active Template Set',
+        description: 'Template will be used for WhatsApp messages.',
+      });
+    } catch {
+      toast({
+        title: 'Update Failed',
+        description: 'Failed to set active template.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const deleteTemplate = async (templateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('whatsapp_templates')
+        .delete()
+        .eq('id', templateId);
+
+      if (error) throw error;
+
+      setTemplates(templates.filter((t) => t.id !== templateId));
+
+      toast({
+        title: 'Template Deleted',
+        description: 'WhatsApp template deleted successfully.',
+      });
+    } catch {
+      toast({
+        title: 'Delete Failed',
+        description: 'Failed to delete template.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const applyFilters = () => {
+    setActiveTagFilter(tempTagFilter);
+    setActiveDateFilter(tempDateFilter);
+    setFilterSheetOpen(false);
+  };
+
+  const clearFilters = () => {
+    setTempTagFilter('All');
+    setTempDateFilter('all');
+    setActiveTagFilter('All');
+    setActiveDateFilter('all');
+    setFilterSheetOpen(false);
+  };
+
+  // Quick tag selection helpers
+  const toggleQuickTagSelection = (tagName: string) => {
+    setQuickTagSelection((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(tagName)) next.delete(tagName);
+      else next.add(tagName);
       return next;
     });
   };
 
-  const selectAllOnPage = () => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      currentPageItems.forEach((c) => next.add(c.id));
-      return next;
-    });
+  const applyQuickTags = () => {
+    const selected = Array.from(quickTagSelection);
+    setPrimaryQuickTags(['All', ...selected]);
+    setQuickTagModalOpen(false);
   };
 
-  const clearSelection = () => setSelectedIds(new Set());
+  // Notes helpers
+  const loadNotesForContact = async (contactId: string) => {
+    if (!user) return;
+    setNotesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('contact_notes')
+        .select('*')
+        .eq('contact_id', contactId)
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false });
 
-  const bulkDelete = () => {
-    if (selectedIds.size === 0) return;
-    // confirm
-    if (!confirm(`Delete ${selectedIds.size} selected contacts?`)) return;
-    setContacts((prev) => prev.filter((c) => !selectedIds.has(c.id)));
-    clearSelection();
+      if (error) throw error;
+      setContactNotes(data || []);
+    } catch (error) {
+      console.error('Failed to load notes', error);
+      toast({
+        title: 'Notes load failed',
+        description: 'Could not load notes for this contact.',
+        variant: 'destructive',
+      });
+    } finally {
+      setNotesLoading(false);
+    }
   };
 
-  const exportCSV = () => {
-    const out = contacts.map((c) => ({
-      id: c.id,
-      name: c.name,
-      company: c.company || "",
-      designation: c.designation || "",
-      phone: c.phone || "",
-      whatsapp: c.whatsapp || "",
-      email: c.email || "",
-      linkedin: c.linkedin || "",
-      tags: (c.tags || []).join(","),
-      createdAt: c.createdAt || "",
-      notes: c.notes || "",
-    }));
-    const csv = Papa.unparse(out);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `contacts_export_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const openNotesModal = async (contact: Contact) => {
+    setNotesContact(contact);
+    setNotesModalOpen(true);
+    await loadNotesForContact(contact.id);
   };
 
-  /* ----------------------
-    Single contact actions
-     ---------------------- */
-  const requestDeleteContact = (id: number) => setDeleteConfirmId(id);
-  const confirmDelete = () => {
-    if (deleteConfirmId == null) return;
-    setContacts((prev) => prev.filter((c) => c.id !== deleteConfirmId));
-    setDeleteConfirmId(null);
+  const addNote = async () => {
+    if (!notesContact || !user || !newNoteText.trim()) return;
+    const text = newNoteText.trim();
+
+    try {
+      const { data, error } = await supabase
+        .from('contact_notes')
+        .insert({
+          contact_id: notesContact.id,
+          owner_user_id: user.id,
+          note: text,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      setNewNoteText('');
+      setContactNotes((prev) => [data as ContactNote, ...prev]);
+
+      toast({
+        title: 'Note added',
+        description: 'Your note has been saved.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Save failed',
+        description: error.message || 'Failed to save note.',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const openTagEditor = (id: number | null) => setTagEditorFor(id);
-  const openNotes = (id: number | null) => setNotesFor(id);
-  const openDetail = (id: number | null) => setDetailFor(id);
-  const openEdit = (id: number | null) => setEditFor(id);
+  // Full-screen contact view
+  const openContactDetail = async (contact: Contact) => {
+    setDetailContact(contact);
+    setContactDetailOpen(true);
+    setNotesContact(contact);
+    await loadNotesForContact(contact.id);
+  };
 
-  /* ----------------------
-    Search (debounced)
-     ---------------------- */
-  const handleSearch = useMemo(
-    () =>
-      debounce((v: string) => {
-        setQuery(v);
-        setPage(1);
-      }, 220),
-    []
-  );
+  const handleCardClick = (contact: Contact) => {
+    openContactDetail(contact);
+  };
 
-  /* ----------------------
-    Render
-     ---------------------- */
+  const handleCardChildClick = (
+    e: MouseEvent,
+    action: () => void
+  ) => {
+    e.stopPropagation();
+    action();
+  };
+
+  if (loading || isLoading || tagsLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
+      </div>
+    );
+  }
+
+  const isFilterActive = activeTagFilter !== 'All' || activeDateFilter !== 'all';
+  const visibleContacts = filteredContacts.slice(0, visibleCount);
+
   return (
-    <div className="p-4 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between gap-4 mb-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">CRM</h1>
-          <span className="text-sm text-slate-500">Contacts</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center border rounded overflow-hidden">
-            <div className="px-2">
-              <Search size={16} />
-            </div>
-            <input
-              ref={searchRef}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by name, company, email..."
-              className="px-2 py-2 outline-none w-64"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              className="flex items-center gap-2 px-3 py-2 rounded bg-indigo-600 text-white"
-              onClick={() => {
-                // Add new contact fallback
-                const newId = Math.max(0, ...contacts.map((c) => c.id)) + 1;
-                const c: Contact = {
-                  id: newId,
-                  name: `New Contact ${newId}`,
-                  createdAt: new Date().toISOString(),
-                  tags: [],
-                };
-                setContacts((prev) => [c, ...prev]);
-                openEdit(newId);
-              }}
-              title="Add contact"
-            >
-              <Plus size={14} /> Add
-            </button>
-
-            <button
-              className="flex items-center gap-2 px-3 py-2 rounded border hover:bg-slate-50"
-              onClick={() => exportCSV()}
-              title="Export CSV"
-            >
-              <Download size={14} /> Export
-            </button>
-
-            <div className="relative">
-              <button
-                className="flex items-center gap-2 px-3 py-2 rounded border hover:bg-slate-50"
-                title="More"
-                onClick={() => {
-                  // placeholder for additional actions
-                  alert("More actions placeholder");
-                }}
+    <div className="min-h-screen bg-white">
+      {/* App Bar */}
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-100 backdrop-blur-xl bg-white/80">
+        <div className="px-4 py-4">
+          <div className="flex items-center justify-between max-w-7xl mx-auto">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate('/my-card')}
+                className="rounded-full hover:bg-slate-100"
               >
-                <MoreHorizontal size={14} />
-              </button>
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+              <div>
+                <h1 className="text-xl font-bold synka-gradient-text">
+                  SYNKA CRM
+                </h1>
+                <p className="text-xs text-slate-500">
+                  {filteredContacts.length} contact
+                  {filteredContacts.length !== 1 ? 's' : ''}
+                </p>
+              </div>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate('/my-card')}
+              className="rounded-full hover:bg-slate-100"
+            >
+              <User className="w-5 h-5" />
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* Filters & bulk */}
-      <div className="flex items-center justify-between gap-4 mb-3">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setSortKey("name");
-                setSortDir((s) => (s === "asc" ? "desc" : "asc"));
-              }}
-              className="px-2 py-1 rounded border text-xs"
-            >
-              Sort: {sortKey} ({sortDir})
-            </button>
-
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="px-2 py-1 rounded border text-xs"
-            >
-              <option value="name">Name</option>
-              <option value="createdAt">Created</option>
-              <option value="company">Company</option>
-            </select>
+      {/* Search + Filter Bar */}
+      <div className="sticky top-[73px] z-40 bg-white border-b border-slate-100 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center gap-2">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              type="text"
+              placeholder="Search name, phone, email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10 rounded-xl border-slate-200 focus:border-violet-300 focus:ring-violet-300"
+            />
           </div>
-
-          <div className="flex items-center gap-2 ml-3">
-            <button onClick={selectAllOnPage} className="text-xs px-2 py-1 rounded border">
-              Select page
-            </button>
-            <button onClick={clearSelection} className="text-xs px-2 py-1 rounded border">
-              Clear
-            </button>
-            <button onClick={() => bulkDelete()} className="text-xs px-2 py-1 rounded border text-red-600">
-              Delete selected ({selectedIds.size})
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="text-sm text-slate-600">Filter by tag</div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTagFilter(null)}
-              className={`px-2 py-1 rounded ${!activeTagFilter ? "bg-slate-200" : "border"}`}
-            >
-              All
-            </button>
-            {allTags.map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveTagFilter((prev) => (prev === t ? null : t))}
-                className={`px-2 py-1 rounded ${activeTagFilter === t ? "bg-indigo-600 text-white" : "border"}`}
+          <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="rounded-xl h-10 w-10 relative"
               >
-                {t}
-              </button>
-            ))}
+                <Filter className="w-4 h-4" />
+                {isFilterActive && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-violet-600 rounded-full" />
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[85vh] rounded-t-3xl">
+              <SheetHeader>
+                <SheetTitle>Filters</SheetTitle>
+              </SheetHeader>
+
+              <div className="mt-6 space-y-6 overflow-y-auto max-h-[calc(85vh-180px)]">
+                {/* Date chips */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Date Range</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {DATE_FILTER_OPTIONS.map((opt) => (
+                      <Badge
+                        key={opt.value}
+                        variant={
+                          tempDateFilter === opt.value ? 'default' : 'outline'
+                        }
+                        className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                          tempDateFilter === opt.value
+                            ? 'synka-gradient text-white border-0'
+                            : ''
+                        }`}
+                        onClick={() => setTempDateFilter(opt.value)}
+                      >
+                        {opt.label}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tag filters */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">Tag Filters</Label>
+                    <button
+                      type="button"
+                      className="text-xs text-slate-500 underline"
+                      onClick={() => setTempTagFilter('All')}
+                    >
+                      Clear tag filter
+                    </button>
+                  </div>
+
+                  {/* Temperature */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Temperature
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {temperatureTags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          variant={
+                            tempTagFilter === tag.name ? 'default' : 'outline'
+                          }
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag.name
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag.name)}
+                        >
+                          {tag.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Relationship */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Relationship
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {relationshipTags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          variant={
+                            tempTagFilter === tag.name ? 'default' : 'outline'
+                          }
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag.name
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag.name)}
+                        >
+                          {tag.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Source */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Source
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {sourceTags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          variant={
+                            tempTagFilter === tag.name ? 'default' : 'outline'
+                          }
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag.name
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag.name)}
+                        >
+                          {tag.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Events */}
+                  {eventTags.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Events
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {eventTags.map((tag) => (
+                          <Badge
+                            key={tag.id}
+                            variant={
+                              tempTagFilter === `Event: ${tag.name}`
+                                ? 'default'
+                                : 'outline'
+                            }
+                            className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                              tempTagFilter === `Event: ${tag.name}`
+                                ? 'synka-gradient text-white border-0'
+                                : ''
+                            }`}
+                            onClick={() =>
+                              setTempTagFilter(`Event: ${tag.name}`)
+                            }
+                          >
+                            {tag.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Status
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {statusTags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          variant={
+                            tempTagFilter === tag.name ? 'default' : 'outline'
+                          }
+                          className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                            tempTagFilter === tag.name
+                              ? 'synka-gradient text-white border-0'
+                              : ''
+                          }`}
+                          onClick={() => setTempTagFilter(tag.name)}
+                        >
+                          {tag.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Custom */}
+                  {customTags.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Other Tags
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {customTags.map((tag) => (
+                          <Badge
+                            key={tag.id}
+                            variant={
+                              tempTagFilter === tag.name ? 'default' : 'outline'
+                            }
+                            className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                              tempTagFilter === tag.name
+                                ? 'synka-gradient text-white border-0'
+                                : ''
+                            }`}
+                            onClick={() => setTempTagFilter(tag.name)}
+                          >
+                            {tag.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
+                  className="flex-1 rounded-xl"
+                >
+                  Clear All
+                </Button>
+                <Button
+                  onClick={applyFilters}
+                  className="flex-1 rounded-xl synka-gradient ripple-effect"
+                >
+                  Apply Filters
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+
+      {/* Primary quick tags */}
+      <div className="sticky top-[137px] z-30 bg-white border-b border-slate-100 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {primaryQuickTags.map((tag) => (
+            <Badge
+              key={tag}
+              variant={activeTagFilter === tag ? 'default' : 'outline'}
+              className={`cursor-pointer px-4 py-2 rounded-full whitespace-nowrap transition-all shrink-0 ${
+                activeTagFilter === tag
+                  ? 'synka-gradient text-white border-0'
+                  : 'border-slate-200'
+              }`}
+              onClick={() => setActiveTagFilter(tag)}
+            >
+              {tag}
+            </Badge>
+          ))}
+
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            className="rounded-full h-8 w-8 shrink-0"
+            onClick={() => setQuickTagModalOpen(true)}
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Bulk Edit Button */}
+      {isFilterActive && filteredContacts.length > 0 && (
+        <div className="px-4 py-3 bg-violet-50/50">
+          <div className="max-w-7xl mx-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openBulkEdit}
+              className="rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50"
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Bulk Edit ({filteredContacts.length})
+            </Button>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Contacts grid */}
-      <div className="grid grid-cols-1 gap-3">
-        {currentPageItems.map((c) => (
-          <ContactCard
-            key={c.id}
-            contact={c}
-            selected={selectedIds.has(c.id)}
-            onToggleSelect={() => toggleSelect(c.id)}
-            onDelete={() => requestDeleteContact(c.id)}
-            onOpenTags={() => openTagEditor(c.id)}
-            onOpenNotes={() => openNotes(c.id)}
-            onOpenDetails={() => openDetail(c.id)}
-            onEdit={() => openEdit(c.id)}
-          />
-        ))}
-        {currentPageItems.length === 0 && <div className="text-center text-slate-500 py-8">No contacts found</div>}
-      </div>
+      {/* Main Content */}
+      <main className="px-4 py-6">
+        <div className="max-w-7xl mx-auto">
+          {contacts.length === 0 ? (
+            <Card className="p-12 rounded-3xl premium-shadow text-center">
+              <div className="w-20 h-20 mx-auto mb-4 synka-gradient rounded-full flex items-center justify-center">
+                <User className="w-10 h-10 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold mb-2">No Contacts Yet</h2>
+              <p className="text-slate-600 mb-6">
+                Share your business card to start collecting contacts
+              </p>
+              <Button
+                onClick={() => navigate('/my-card')}
+                className="synka-gradient ripple-effect"
+              >
+                View My Card
+              </Button>
+            </Card>
+          ) : visibleContacts.length === 0 ? (
+            <Card className="p-12 rounded-3xl premium-shadow text-center">
+              <p className="text-slate-600">No contacts match your filters</p>
+            </Card>
+          ) : (
+            <div className="space-y-3 animate-slide-in">
+              {visibleContacts.map((contact) => (
+                <Card
+                  key={contact.id}
+                  className={`p-4 rounded-2xl border-l-4 premium-shadow premium-shadow-hover transition-all ${getStatusColor(
+                    contact.tags || []
+                  )}`}
+                  onClick={() => handleCardClick(contact)}
+                >
+                  {/* Top Row: name + tags + date + menu */}
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-[15px] font-semibold text-slate-900 mb-1 truncate">
+                        {contact.name}
+                      </h3>
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        {(contact.tags || []).slice(0, 3).map((tag, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="outline"
+                            className={`text-[10px] px-2 py-[3px] rounded-full ${getTagColor(
+                              tag
+                            )}`}
+                          >
+                            {tag.startsWith('Event:')
+                              ? tag.replace('Event: ', '')
+                              : tag}
+                          </Badge>
+                        ))}
+                        {(contact.tags || []).length > 3 && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-2 py-[3px] rounded-full bg-slate-50"
+                          >
+                            +{(contact.tags || []).length - 3}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) =>
+                          handleCardChildClick(e, () => openEditTags(contact))
+                        }
+                        className="rounded-full h-8 w-8"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                      <span className="text-[10px] text-slate-400">
+                        {formatDateTime(contact.created_at)}
+                      </span>
+                    </div>
+                  </div>
 
-      {/* Pagination */}
-      <footer className="mt-4 flex items-center justify-between">
-        <div className="text-sm text-slate-600">
-          Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, filteredSorted.length)} of {filteredSorted.length}
+                  {/* Info + icon actions */}
+                  <div className="space-y-1.5">
+                    {contact.email && (
+                      <div className="flex items-center gap-2 text-[12px] text-slate-600">
+                        <Mail className="w-4 h-4 shrink-0 text-slate-400" />
+                        <button
+                          onClick={(e) =>
+                            handleCardChildClick(e, () =>
+                              handleEmail(contact.email)
+                            )
+                          }
+                          className="truncate hover:text-violet-600 transition-colors text-left"
+                        >
+                          {contact.email}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-3 text-[12px] text-slate-600 mt-1">
+                      {contact.mobile ? (
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 shrink-0 text-slate-400" />
+                          <button
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                handleCall(contact.mobile!)
+                              )
+                            }
+                            className="hover:text-violet-600 transition-colors"
+                          >
+                            {contact.mobile}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-slate-400">
+                          No phone
+                        </span>
+                      )}
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Record */}
+                        {recordingContact?.id === contact.id ? (
+                          <button
+                            type="button"
+                            onClick={(e) =>
+                              handleCardChildClick(e, () => stopRecording())
+                            }
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-red-300 bg-red-50 text-red-600 text-xs shadow-sm active:scale-95 transition"
+                            aria-label="Stop recording"
+                            disabled={isProcessingMoM}
+                          >
+                            {isProcessingMoM ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                startRecording(contact)
+                              )
+                            }
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 text-xs shadow-sm active:scale-95 transition"
+                            aria-label="Record meeting"
+                            disabled={isRecording || isProcessingMoM}
+                          >
+                            <Mic className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {/* Notes icon */}
+                        <button
+                          type="button"
+                          onClick={(e) =>
+                            handleCardChildClick(e, () => openNotesModal(contact))
+                          }
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 text-xs shadow-sm active:scale-95 transition"
+                          aria-label="Notes"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* WhatsApp */}
+                        {contact.whatsapp && (
+                          <button
+                            type="button"
+                            onClick={(e) =>
+                              handleCardChildClick(e, () =>
+                                handleWhatsApp(contact)
+                              )
+                            }
+                            className="flex h-8 w-8 items-center justify-center rounded-full border-[#25D366] bg-[#E9F9EE] text-[#25D366] shadow-[0_2px_6px_rgba(37,211,102,0.4)] active:scale-95 transition"
+                            aria-label="WhatsApp"
+                          >
+                            <WhatsAppIcon className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* LinkedIn */}
+                        {contact.linkedin_url && (
+                          <IconCircleButton
+                            onClick={() => handleLinkedIn(contact.linkedin_url!)}
+                            ariaLabel="Open LinkedIn"
+                          >
+                            <Linkedin className="w-[15px] h-[15px]" />
+                          </IconCircleButton>
+                        )}
+
+                        {/* Save */}
+                        <IconCircleButton
+                          onClick={() => handleSaveContact(contact)}
+                          ariaLabel="Download vCard"
+                          primary
+                        >
+                          <Download className="w-[15px] h-[15px]" />
+                        </IconCircleButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  {recordingContact?.id === contact.id && (
+                    <div className="mt-2 text-[11px] text-red-500 flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      Recording... {formatRecordingTime(recordingTime)}
+                    </div>
+                  )}
+                </Card>
+              ))}
+
+              {visibleCount < filteredContacts.length && (
+                <div className="py-4 text-center text-xs text-slate-400">
+                  Scroll to load more...
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      </main>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="p-2 rounded border disabled:opacity-60"
-            disabled={page <= 1}
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <div className="text-sm px-2 py-1 border rounded">{page}</div>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            className="p-2 rounded border disabled:opacity-60"
-            disabled={page >= totalPages}
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      </footer>
-
-      {/* Modals / drawers */}
-      {deleteConfirmId !== null && (
-        <ConfirmModal
-          title="Delete contact"
-          description="Are you sure you want to delete this contact? This cannot be undone."
-          onCancel={() => setDeleteConfirmId(null)}
-          onConfirm={() => confirmDelete()}
-        />
-      )}
-
-      {tagEditorFor !== null && (
-        <TagModal
-          contact={contacts.find((x) => x.id === tagEditorFor) as Contact}
-          onClose={() => setTagEditorFor(null)}
-          onSave={(newTags) => {
-            setContacts((prev) => prev.map((c) => (c.id === tagEditorFor ? { ...c, tags: newTags } : c)));
-            setTagEditorFor(null);
-          }}
-        />
-      )}
-
-      {notesFor !== null && (
-        <NotesModal contact={contacts.find((x) => x.id === notesFor) as Contact} onClose={() => setNotesFor(null)} />
-      )}
-
-      {detailFor !== null && (
-        <DetailDrawer contact={contacts.find((x) => x.id === detailFor) as Contact} onClose={() => setDetailFor(null)} onEdit={() => openEdit(detailFor)} />
-      )}
-
-      {editFor !== null && (
-        <EditModal
-          contact={contacts.find((x) => x.id === editFor) as Contact}
-          onClose={() => setEditFor(null)}
-          onSave={(updated) => {
-            setContacts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-            setEditFor(null);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ----------------------
-  Contact Card component (main UI per your spec)
-   ---------------------- */
-function ContactCard({
-  contact,
-  selected,
-  onToggleSelect,
-  onDelete,
-  onOpenTags,
-  onOpenNotes,
-  onOpenDetails,
-  onEdit,
-}: {
-  contact: Contact;
-  selected: boolean;
-  onToggleSelect: () => void;
-  onDelete: () => void;
-  onOpenTags: () => void;
-  onOpenNotes: () => void;
-  onOpenDetails: () => void;
-  onEdit: () => void;
-}): JSX.Element {
-  const { id, name, company, designation, avatar, tags, createdAt } = contact;
-  const initials = (name || "")
-    .split(" ")
-    .map((s) => (s ? s[0] : ""))
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
-  const hasCompanyOrDesignation = Boolean(company) || Boolean(designation);
-
-  const [revealed, setRevealed] = useState<null | "left" | "right">(null);
-
-  const handlers = useSwipeable({
-    onSwipedLeft: () => {
-      setRevealed("left");
-      setTimeout(onDelete, 200);
-    },
-    onSwipedRight: () => {
-      setRevealed("right");
-      setTimeout(onOpenNotes, 160);
-    },
-    trackMouse: true,
-    preventDefaultTouchmoveEvent: true,
-  });
-
-  return (
-    <div
-      {...handlers}
-      className="relative bg-white rounded-lg border shadow-sm hover:shadow-md transition p-4 flex items-start gap-3"
-      role="article"
-      aria-labelledby={`contact-${id}`}
-    >
-      {/* Selection checkbox */}
-      <div className="flex items-start gap-3">
-        <input type="checkbox" checked={selected} onChange={onToggleSelect} className="mt-1" aria-label={`Select ${name}`} />
-      </div>
-
-      {/* Avatar */}
-      <div className="flex-shrink-0">
-        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
-          {avatar ? <img src={avatar} alt={name} className="w-full h-full object-cover" /> : <span className="font-semibold text-slate-700">{initials}</span>}
-        </div>
-      </div>
-
-      {/* Main */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 id={`contact-${id}`} className="text-sm font-medium truncate">
-                {name}
-              </h3>
+      {/* Edit Tags Modal */}
+      <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Tags</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            {/* Temperature */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Temperature</Label>
+              <div className="flex flex-wrap gap-2">
+                {temperatureTags.map((tag) => (
+                  <Badge
+                    key={tag.id}
+                    variant={
+                      selectedTags.includes(tag.name) ? 'default' : 'outline'
+                    }
+                    className={`cursor-pointer px-3 py-1.5 rounded-full flex items-center gap-1 ${
+                      selectedTags.includes(tag.name)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
+                    }`}
+                    onClick={() => toggleTag(tag.name)}
+                  >
+                    <span>{tag.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCategoryTag(tag);
+                      }}
+                      className="rounded-full p-[2px] hover:bg-black/10"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add temperature tag..."
+                  value={newTemperatureTag}
+                  onChange={(e) => setNewTemperatureTag(e.target.value)}
+                  className="rounded-full h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="rounded-full h-8 w-8"
+                  onClick={handleAddTemperatureTag}
+                >
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </div>
             </div>
 
-            {hasCompanyOrDesignation ? (
-              <p className="text-xs text-slate-500 truncate mt-1">{company && designation ? `${company} • ${designation}` : company || designation}</p>
-            ) : (
-              <p className="text-xs text-slate-400 mt-1">&nbsp;</p>
+            {/* Relationship */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Relationship</Label>
+              <div className="flex flex-wrap gap-2">
+                {relationshipTags.map((tag) => (
+                  <Badge
+                    key={tag.id}
+                    variant={
+                      selectedTags.includes(tag.name) ? 'default' : 'outline'
+                    }
+                    className={`cursor-pointer px-3 py-1.5 rounded-full flex items-center gap-1 ${
+                      selectedTags.includes(tag.name)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
+                    }`}
+                    onClick={() => toggleTag(tag.name)}
+                  >
+                    <span>{tag.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCategoryTag(tag);
+                      }}
+                      className="rounded-full p-[2px] hover:bg-black/10"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add relationship tag..."
+                  value={newRelationshipTag}
+                  onChange={(e) => setNewRelationshipTag(e.target.value)}
+                  className="rounded-full h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="rounded-full h-8 w-8"
+                  onClick={handleAddRelationshipTag}
+                >
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Source */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Source</Label>
+              <div className="flex flex-wrap gap-2">
+                {sourceTags.map((tag) => (
+                  <Badge
+                    key={tag.id}
+                    variant={
+                      selectedTags.includes(tag.name) ? 'default' : 'outline'
+                    }
+                    className={`cursor-pointer px-3 py-1.5 rounded-full flex items-center gap-1 ${
+                      selectedTags.includes(tag.name)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
+                    }`}
+                    onClick={() => toggleTag(tag.name)}
+                  >
+                    <span>{tag.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCategoryTag(tag);
+                      }}
+                      className="rounded-full p-[2px] hover:bg-black/10"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add source tag..."
+                  value={newSourceTag}
+                  onChange={(e) => setNewSourceTag(e.target.value)}
+                  className="rounded-full h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="rounded-full h-8 w-8"
+                  onClick={handleAddSourceTag}
+                >
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Event */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="event-tag"
+                  checked={eventTagEnabled}
+                  onCheckedChange={(checked) =>
+                    setEventTagEnabled(checked as boolean)
+                  }
+                />
+                <Label
+                  htmlFor="event-tag"
+                  className="text-sm font-semibold cursor-pointer"
+                >
+                  Event
+                </Label>
+              </div>
+              {eventTagEnabled && (
+                <Input
+                  placeholder="Enter event name (e.g. Diwali Expo)..."
+                  value={eventName}
+                  onChange={(e) => setEventName(e.target.value)}
+                  className="rounded-xl"
+                />
+              )}
+            </div>
+
+            {/* Status */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Status</Label>
+              <div className="flex flex-wrap gap-2">
+                {statusTags.map((tag) => (
+                  <Badge
+                    key={tag.id}
+                    variant={
+                      selectedTags.includes(tag.name) ? 'default' : 'outline'
+                    }
+                    className={`cursor-pointer px-3 py-1.5 rounded-full flex items-center gap-1 ${
+                      selectedTags.includes(tag.name)
+                        ? 'synka-gradient text-white border-0'
+                        : ''
+                    }`}
+                    onClick={() => toggleTag(tag.name)}
+                  >
+                    <span>{tag.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCategoryTag(tag);
+                      }}
+                      className="rounded-full p-[2px] hover:bg-black/10"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add status tag..."
+                  value={newStatusTag}
+                  onChange={(e) => setNewStatusTag(e.target.value)}
+                  className="rounded-full h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="rounded-full h-8 w-8"
+                  onClick={handleAddStatusTag}
+                >
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Custom tag for this contact only */}
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">Custom Tag</Label>
+              <Input
+                placeholder="Enter custom tag (e.g. Bharat, Happy)..."
+                value={customTag}
+                onChange={(e) => setCustomTag(e.target.value)}
+                className="rounded-xl"
+              />
+            </div>
+
+            <Button
+              onClick={handleSaveTags}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
+              <Tag className="w-4 h-4 mr-2" />
+              Save Tags
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Edit Modal */}
+      <Dialog open={bulkEditModalOpen} onOpenChange={setBulkEditModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Bulk Edit Tags</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            <p className="text-sm text-slate-600">
+              {bulkSelectedContacts.size} contact
+              {bulkSelectedContacts.size !== 1 ? 's' : ''} selected
+            </p>
+
+            <div className="space-y-2 max-h-48 overflow-y-auto border rounded-2xl p-3">
+              {filteredContacts.map((contact) => (
+                <div
+                  key={contact.id}
+                  className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl"
+                >
+                  <Checkbox
+                    checked={bulkSelectedContacts.has(contact.id)}
+                    onCheckedChange={() => toggleBulkContact(contact.id)}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm">{contact.name}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {contact.email || contact.mobile}
+                    </p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(contact.tags || []).map((tag, idx) => (
+                        <Badge
+                          key={idx}
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 rounded-full"
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              {/* Temperature */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Temperature</Label>
+                <div className="flex flex-wrap gap-2">
+                  {temperatureTags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant={
+                        bulkTags.includes(tag.name) ? 'default' : 'outline'
+                      }
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag.name)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
+                      }`}
+                      onClick={() => toggleBulkTag(tag.name)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Relationship */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Relationship</Label>
+                <div className="flex flex-wrap gap-2">
+                  {relationshipTags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant={
+                        bulkTags.includes(tag.name) ? 'default' : 'outline'
+                      }
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag.name)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
+                      }`}
+                      onClick={() => toggleBulkTag(tag.name)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Source */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Source</Label>
+                <div className="flex flex-wrap gap-2">
+                  {sourceTags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant={
+                        bulkTags.includes(tag.name) ? 'default' : 'outline'
+                      }
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag.name)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
+                      }`}
+                      onClick={() => toggleBulkTag(tag.name)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Event */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="bulk-event-tag"
+                    checked={bulkEventEnabled}
+                    onCheckedChange={(checked) =>
+                      setBulkEventEnabled(checked as boolean)
+                    }
+                  />
+                  <Label
+                    htmlFor="bulk-event-tag"
+                    className="text-sm font-semibold cursor-pointer"
+                  >
+                    Event
+                  </Label>
+                </div>
+                {bulkEventEnabled && (
+                  <Input
+                    placeholder="Enter event name..."
+                    value={bulkEventName}
+                    onChange={(e) => setBulkEventName(e.target.value)}
+                    className="rounded-xl animate-slide-up"
+                  />
+                )}
+              </div>
+
+              {/* Status */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Status</Label>
+                <div className="flex flex-wrap gap-2">
+                  {statusTags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant={
+                        bulkTags.includes(tag.name) ? 'default' : 'outline'
+                      }
+                      className={`cursor-pointer px-3 py-1.5 rounded-full ${
+                        bulkTags.includes(tag.name)
+                          ? 'synka-gradient text-white border-0'
+                          : ''
+                      }`}
+                      onClick={() => toggleBulkTag(tag.name)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Custom Tag</Label>
+                <Input
+                  placeholder="Enter custom tag..."
+                  value={bulkCustomTag}
+                  onChange={(e) => setBulkCustomTag(e.target.value)}
+                  className="rounded-xl"
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={handleBulkApply}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
+              Apply to Selected Contacts
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* MoM Modal */}
+      <Dialog open={momModalOpen} onOpenChange={setMomModalOpen}>
+        <DialogContent className="max-w-2xl rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Minutes of Meeting -{' '}
+              {contacts.find((c) => c.id === momContactId)?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              value={momText}
+              onChange={(e) => setMomText(e.target.value)}
+              rows={12}
+              className="font-mono text-sm rounded-xl"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Button
+                variant="outline"
+                onClick={shareMoMViaWhatsApp}
+                className="rounded-xl"
+              >
+                <MessageCircle className="w-4 h-4 mr-2" />
+                WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareMoMViaEmail}
+                className="rounded-xl"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Email
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareMoMViaBoth}
+                className="rounded-xl"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Both
+              </Button>
+            </div>
+
+            <Button
+              onClick={saveMoMToCRM}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Save to CRM
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Manager Modal */}
+      <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>WhatsApp Templates</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            {templates.length > 0 && (
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Saved Templates</Label>
+                {templates.map((template) => (
+                  <Card
+                    key={template.id}
+                    className="p-4 rounded-2xl premium-shadow"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-sm">
+                            {template.name}
+                          </h4>
+                          {template.is_active && (
+                            <Badge className="text-xs synka-gradient border-0">
+                              Active
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 line-clamp-2">
+                          {template.body_template}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {!template.is_active && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setActiveTemplate(template.id)}
+                            className="rounded-xl"
+                          >
+                            <Star className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingTemplate(template);
+                            setNewTemplateName(template.name);
+                            setNewTemplateBody(template.body_template);
+                          }}
+                          className="rounded-xl"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => deleteTemplate(template.id)}
+                          className="rounded-xl"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
             )}
-          </div>
 
-          <div className="flex items-center gap-3 ml-3">
-            <button onClick={onOpenTags} title="Tags" className="p-1 rounded hover:bg-slate-100">
-              <TagIcon size={16} />
-            </button>
-
-            <div className="text-xs text-slate-400 flex items-center gap-1">
-              <Clock size={12} />
-              <span>{formatCreatedAt(createdAt)}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Icons row */}
-        <div className="mt-3 flex items-center gap-3 text-slate-600">
-          {contact.phone && (
-            <button className="flex items-center gap-2 text-xs" title="Call" onClick={() => alert(`Call ${contact.phone}`)}>
-              <Phone size={16} />
-            </button>
-          )}
-
-          {contact.whatsapp && (
-            <button className="flex items-center gap-2 text-xs" title="WhatsApp" onClick={() => alert(`WhatsApp ${contact.whatsapp}`)}>
-              <MessageCircle size={16} />
-            </button>
-          )}
-
-          {contact.email && (
-            <button className="flex items-center gap-2 text-xs" title="Email" onClick={() => alert(`Email ${contact.email}`)}>
-              <Mail size={16} />
-            </button>
-          )}
-
-          {contact.linkedin && (
-            <button className="flex items-center gap-2 text-xs" title="LinkedIn" onClick={() => window.open(contact.linkedin, "_blank")}>
-              <Linkedin size={16} />
-            </button>
-          )}
-
-          {contact.notes && (
-            <button className="flex items-center gap-2 text-xs" title="Notes" onClick={onOpenNotes}>
-              <Edit2 size={16} />
-            </button>
-          )}
-
-          <div className="flex items-center gap-1 ml-2 flex-wrap">
-            {(tags || []).slice(0, 3).map((t) => (
-              <span key={t} className="text-[10px] px-2 py-0.5 bg-slate-100 rounded-full text-slate-700">
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Right actions */}
-      <div className="flex flex-col gap-2 items-end">
-        <button onClick={onEdit} className="p-1 rounded hover:bg-slate-100" title="Edit">
-          <Edit2 size={14} />
-        </button>
-        <button onClick={onOpenDetails} className="p-1 rounded hover:bg-slate-100" title="Open">
-          <MoreHorizontal size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------
-  Tag Modal
-   ---------------------- */
-function TagModal({ contact, onClose, onSave }: { contact: Contact; onClose: () => void; onSave: (tags: string[]) => void }): JSX.Element {
-  const [value, setValue] = useState<string>((contact.tags || []).join(", "));
-
-  const save = () => {
-    const newTags = value
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    onSave(newTags);
-  };
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-medium">Edit Tags — {contact.name}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
-            <XIcon size={16} />
-          </button>
-        </div>
-
-        <p className="text-sm text-slate-500 mb-3">Enter tags separated by commas.</p>
-        <input value={value} onChange={(e) => setValue(e.target.value)} className="w-full border px-3 py-2 rounded mb-3" placeholder="Lead, VIP, TradeShow" />
-
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded">
-            Cancel
-          </button>
-          <button onClick={save} className="px-3 py-2 rounded bg-indigo-600 text-white">
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------
-  Notes Modal
-   ---------------------- */
-function NotesModal({ contact, onClose }: { contact: Contact | undefined; onClose: () => void }): JSX.Element | null {
-  if (!contact) return null;
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-lg shadow-lg w-full max-w-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-medium">Notes — {contact.name}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
-            <XIcon size={16} />
-          </button>
-        </div>
-
-        <div className="text-sm text-slate-700 whitespace-pre-wrap">{contact.notes || "(No notes)"}</div>
-
-        <div className="flex justify-end mt-4">
-          <button onClick={onClose} className="px-3 py-2 rounded bg-indigo-600 text-white">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------
-  Details Drawer
-   ---------------------- */
-function DetailDrawer({ contact, onClose, onEdit }: { contact: Contact | undefined; onClose: () => void; onEdit: () => void }): JSX.Element | null {
-  if (!contact) return null;
-  return (
-    <div className="fixed inset-0 z-40 flex">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative ml-auto w-full max-w-md bg-white h-full p-4 overflow-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium">{contact.name}</h3>
-          <div className="flex items-center gap-2">
-            <button onClick={onEdit} className="px-2 py-1 rounded border text-sm">
-              Edit
-            </button>
-            <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
-              <XIcon size={16} />
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
-              {contact.avatar ? <img src={contact.avatar} alt={contact.name} className="w-full h-full object-cover" /> : <span className="font-semibold">{(contact.name || "").slice(0, 2).toUpperCase()}</span>}
-            </div>
-            <div>
-              <div className="text-sm font-medium">{contact.name}</div>
-              <div className="text-xs text-slate-500">
-                {contact.company} {contact.company && contact.designation ? "•" : ""} {contact.designation}
+            <div className="space-y-4 pt-4 border-t">
+              <Label className="text-sm font-semibold">
+                {editingTemplate ? 'Edit Template' : 'Create New Template'}
+              </Label>
+              <div className="space-y-3">
+                <Input
+                  placeholder="Template name..."
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                  className="rounded-xl"
+                />
+                <Textarea
+                  placeholder="Hi {{name}}, it was great connecting with you..."
+                  value={newTemplateBody}
+                  onChange={(e) => setNewTemplateBody(e.target.value)}
+                  rows={4}
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-slate-500">
+                  Use: <code>{'{{name}}'}</code>, <code>{'{{company}}'}</code>,{' '}
+                  <code>{'{{my_name}}'}</code>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveTemplate}
+                    className="flex-1 rounded-xl synka-gradient ripple-effect"
+                  >
+                    {editingTemplate ? 'Update' : 'Create'}
+                  </Button>
+                  {editingTemplate && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingTemplate(null);
+                        setNewTemplateName('');
+                        setNewTemplateBody('');
+                      }}
+                      className="rounded-xl"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
 
-          <div>Created: {formatCreatedAt(contact.createdAt)}</div>
+      {/* Notes Modal (icon click) */}
+      <Dialog open={notesModalOpen} onOpenChange={setNotesModalOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Notes - {notesContact ? notesContact.name : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              placeholder="Add a note about this contact..."
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              rows={3}
+              className="rounded-xl"
+            />
+            <Button
+              onClick={addNote}
+              disabled={!newNoteText.trim()}
+              className="w-full rounded-xl synka-gradient ripple-effect"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Save Note
+            </Button>
 
-          <div className="pt-2">
-            <div className="text-xs text-slate-500 mb-1">Contact</div>
-            <div className="flex flex-col gap-2">
-              {contact.phone && (
-                <div className="flex items-center gap-2">
-                  <Phone size={14} /> <span>{contact.phone}</span>
+            <div className="border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-3">
+              {notesLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
                 </div>
-              )}
-              {contact.whatsapp && (
-                <div className="flex items-center gap-2">
-                  <MessageCircle size={14} /> <span>{contact.whatsapp}</span>
-                </div>
-              )}
-              {contact.email && (
-                <div className="flex items-center gap-2">
-                  <Mail size={14} /> <span>{contact.email}</span>
-                </div>
-              )}
-              {contact.linkedin && (
-                <div className="flex items-center gap-2">
-                  <Linkedin size={14} /> <a href={contact.linkedin} target="_blank" rel="noreferrer" className="underline">
-                    LinkedIn
-                  </a>
-                </div>
+              ) : contactNotes.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No notes yet for this contact.
+                </p>
+              ) : (
+                contactNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    className="rounded-xl bg-slate-50 px-3 py-2"
+                  >
+                    <p className="text-xs text-slate-500 mb-1">
+                      {formatDateTime(note.created_at)}
+                    </p>
+                    <p className="text-sm text-slate-800 whitespace-pre-line">
+                      {note.note}
+                    </p>
+                  </div>
+                ))
               )}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
 
-          <div>
-            <div className="text-xs text-slate-500 mb-1">Tags</div>
-            <div className="flex gap-2 flex-wrap">{(contact.tags || []).map((t) => (<span key={t} className="px-2 py-1 bg-slate-100 rounded text-xs">{t}</span>))}</div>
-          </div>
+      {/* Full-screen Contact Detail */}
+      <Dialog open={contactDetailOpen} onOpenChange={setContactDetailOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {detailContact ? detailContact.name : 'Contact Details'}
+            </DialogTitle>
+          </DialogHeader>
+          {detailContact && (
+            <div className="space-y-5">
+              {/* SYNKA digital card link if present */}
+              {detailContact.synka_card_url && (
+                <Card className="p-3 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600">
+                      SYNKA Digital Card
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Open the digital card shared by this contact.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="rounded-xl synka-gradient ripple-effect"
+                    onClick={() =>
+                      window.open(detailContact.synka_card_url!, '_blank')
+                    }
+                  >
+                    Open
+                  </Button>
+                </Card>
+              )}
 
-          <div>
-            <div className="text-xs text-slate-500 mb-1">Notes</div>
-            <div className="text-sm text-slate-700 whitespace-pre-wrap">{contact.notes || "(No notes)"}</div>
+              {/* Tags */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500">Tags</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(detailContact.tags || []).length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      No tags. Tap "..." on card to add tags.
+                    </p>
+                  ) : (
+                    (detailContact.tags || []).map((tag, idx) => (
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className={`text-[11px] px-2 py-[3px] rounded-full ${getTagColor(
+                          tag
+                        )}`}
+                      >
+                        {tag.startsWith('Event:')
+                          ? tag.replace('Event: ', '')
+                          : tag}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <Card className="p-4 rounded-2xl space-y-2">
+                {detailContact.email && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Mail className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() => handleEmail(detailContact.email)}
+                      className="hover:text-violet-600 transition-colors text-left truncate"
+                    >
+                      {detailContact.email}
+                    </button>
+                  </div>
+                )}
+                {detailContact.mobile && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Phone className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() => handleCall(detailContact.mobile!)}
+                      className="hover:text-violet-600 transition-colors"
+                    >
+                      {detailContact.mobile}
+                    </button>
+                  </div>
+                )}
+                {detailContact.whatsapp && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                    <button
+                      onClick={() => handleWhatsApp(detailContact)}
+                      className="hover:text-violet-600 transition-colors"
+                    >
+                      {detailContact.whatsapp}
+                    </button>
+                  </div>
+                )}
+                {detailContact.linkedin_url && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Linkedin className="w-4 h-4 text-slate-400" />
+                    <button
+                      onClick={() =>
+                        handleLinkedIn(detailContact.linkedin_url!)
+                      }
+                      className="hover:text-violet-600 transition-colors truncate"
+                    >
+                      {detailContact.linkedin_url}
+                    </button>
+                  </div>
+                )}
+                <div className="text-xs text-slate-400 mt-2">
+                  Added on {formatDateTime(detailContact.created_at)}
+                </div>
+              </Card>
+
+              {/* Existing MoM / meeting notes */}
+              {detailContact.meeting_notes && (
+                <Card className="p-4 rounded-2xl">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Meeting Notes (MoM)
+                    </p>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="rounded-full h-7 px-3 text-[11px]"
+                      onClick={() => {
+                        setMomContactId(detailContact.id);
+                        setMomText(detailContact.meeting_notes || '');
+                        setMomModalOpen(true);
+                      }}
+                    >
+                      View / Share
+                    </Button>
+                  </div>
+                  <p className="text-sm text-slate-700 line-clamp-4 whitespace-pre-line">
+                    {detailContact.meeting_notes}
+                  </p>
+                </Card>
+              )}
+
+              {/* Notes Section at bottom */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-500">Notes</p>
+                  {notesContact?.id !== detailContact.id && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="rounded-full h-7 px-3 text-[11px]"
+                      onClick={() => {
+                        setNotesContact(detailContact);
+                        loadNotesForContact(detailContact.id);
+                      }}
+                    >
+                      Load Notes
+                    </Button>
+                  )}
+                </div>
+
+                <Textarea
+                  placeholder="Add a note about this contact..."
+                  value={notesContact?.id === detailContact.id ? newNoteText : ''}
+                  onChange={(e) => {
+                    if (notesContact?.id === detailContact.id) {
+                      setNewNoteText(e.target.value);
+                    } else {
+                      setNotesContact(detailContact);
+                      setNewNoteText(e.target.value);
+                    }
+                  }}
+                  rows={3}
+                  className="rounded-xl"
+                />
+                <Button
+                  onClick={addNote}
+                  disabled={
+                    !notesContact ||
+                    notesContact.id !== detailContact.id ||
+                    !newNoteText.trim()
+                  }
+                  className="w-full rounded-xl synka-gradient ripple-effect"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  Save Note
+                </Button>
+
+                <div className="border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-3">
+                  {notesContact?.id !== detailContact.id || notesLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
+                    </div>
+                  ) : contactNotes.length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      No notes yet. Add your first note above.
+                    </p>
+                  ) : (
+                    contactNotes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="rounded-xl bg-slate-50 px-3 py-2"
+                      >
+                        <p className="text-xs text-slate-500 mb-1">
+                          {formatDateTime(note.created_at)}
+                        </p>
+                        <p className="text-sm text-slate-800 whitespace-pre-line">
+                          {note.note}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Filter Tag Manager Modal */}
+      <Dialog open={quickTagModalOpen} onOpenChange={setQuickTagModalOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Quick Filters</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">
+              Choose which tags should appear in the quick filter bar under
+              search.
+            </p>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500">
+                Available Tags
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {allAvailableTagStrings.length === 0 ? (
+                  <p className="text-xs text-slate-400">
+                    No tags available yet. Add tags to contacts first.
+                  </p>
+                ) : (
+                  allAvailableTagStrings.map((tagName) => (
+                    <button
+                      key={tagName}
+                      type="button"
+                      onClick={() => toggleQuickTagSelection(tagName)}
+                      className={[
+                        'px-3 py-1.5 rounded-full text-xs border',
+                        quickTagSelection.has(tagName)
+                          ? 'synka-gradient text-white border-0'
+                          : 'border-slate-200 text-slate-700 bg-white',
+                      ].join(' ')}
+                    >
+                      {tagName.startsWith('Event:')
+                        ? tagName.replace('Event: ', '')
+                        : tagName}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 rounded-xl"
+                onClick={() => setQuickTagSelection(new Set())}
+              >
+                Clear
+              </Button>
+              <Button
+                type="button"
+                className="flex-1 rounded-xl synka-gradient ripple-effect"
+                onClick={applyQuickTags}
+              >
+                Save
+              </Button>
+            </div>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-/* ----------------------
-  Edit Modal (simple inline editor)
-   ---------------------- */
-function EditModal({ contact, onClose, onSave }: { contact: Contact | undefined; onClose: () => void; onSave: (c: Contact) => void }): JSX.Element | null {
-  const [form, setForm] = useState<Contact | null>(contact ?? null);
-  useEffect(() => setForm(contact ?? null), [contact]);
-
-  if (!form) return null;
-
-  const update = (patch: Partial<Contact>) => setForm((s) => ({ ...(s as Contact), ...patch }));
+/** small circular icon button for LinkedIn / Save */
+function IconCircleButton({
+  children,
+  onClick,
+  ariaLabel,
+  primary,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  ariaLabel: string;
+  primary?: boolean;
+}) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-lg shadow-lg w-full max-w-lg p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium">Edit — {form.name}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
-            <XIcon size={16} />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3">
-          <input value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder="Name" className="w-full border px-3 py-2 rounded" />
-          <input value={form.company || ""} onChange={(e) => update({ company: e.target.value })} placeholder="Company" className="w-full border px-3 py-2 rounded" />
-          <input value={form.designation || ""} onChange={(e) => update({ designation: e.target.value })} placeholder="Designation" className="w-full border px-3 py-2 rounded" />
-          <input value={form.phone || ""} onChange={(e) => update({ phone: e.target.value })} placeholder="Phone" className="w-full border px-3 py-2 rounded" />
-          <input value={form.whatsapp || ""} onChange={(e) => update({ whatsapp: e.target.value })} placeholder="WhatsApp" className="w-full border px-3 py-2 rounded" />
-          <input value={form.email || ""} onChange={(e) => update({ email: e.target.value })} placeholder="Email" className="w-full border px-3 py-2 rounded" />
-          <input value={form.linkedin || ""} onChange={(e) => update({ linkedin: e.target.value })} placeholder="LinkedIn URL" className="w-full border px-3 py-2 rounded" />
-          <textarea value={form.notes || ""} onChange={(e) => update({ notes: e.target.value })} placeholder="Notes" className="w-full border px-3 py-2 rounded" />
-          <input value={form.avatar || ""} onChange={(e) => update({ avatar: e.target.value })} placeholder="Avatar URL" className="w-full border px-3 py-2 rounded" />
-        </div>
-
-        <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="px-3 py-2 rounded">
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              onSave(form as Contact);
-            }}
-            className="px-3 py-2 rounded bg-indigo-600 text-white"
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-label={ariaLabel}
+      className={[
+        'flex h-8 w-8 items-center justify-center rounded-full border text-xs transition-all shadow-sm',
+        primary
+          ? 'border-violet-500 bg-gradient-to-r from-violet-500 to-indigo-500 text-white hover:shadow-md active:scale-95'
+          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:scale-95',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   );
 }
 
-/* ----------------------
-  Confirmation modal
-   ---------------------- */
-function ConfirmModal({ title, description, onCancel, onConfirm }: { title: string; description: string; onCancel: () => void; onConfirm: () => void }) {
+/** WhatsApp-style icon using currentColor */
+function WhatsAppIcon({ className }: { className?: string }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onCancel} />
-      <div className="relative bg-white rounded-lg shadow-lg w-full max-w-sm p-4">
-        <h3 className="text-lg font-semibold mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-4">{description}</p>
-
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="px-3 py-2 rounded">
-            Cancel
-          </button>
-          <button onClick={onConfirm} className="px-3 py-2 rounded bg-red-600 text-white">
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
+    <svg
+      viewBox="0 0 32 32"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M16 4c-6.1 0-11 4.6-11 10.4 0 2 .6 3.9 1.7 5.6L6 27l7.1-2.2c1 0.3 2.1 0.4 3.2 0.4 6.1 0 11-4.6 11-10.4S22.1 4 16 4z"
+        fill="currentColor"
+        fillOpacity="0.95"
+      />
+      <circle cx="16" cy="15" r="7.8" fill="white" />
+      <path
+        d="M19.6 18.9c-.3-.2-1.7-.8-2-1-.3-.1-.5-.2-.7.2-.2.3-.7 1-.9 1.1-.2.2-.3.2-.6.1-1.6-.8-2.6-1.9-3.3-3.4-.1-.3 0-.4.2-.6.2-.2.3-.3.4-.5.1-.1.1-.2.2-.4.1-.2 0-.4 0-.5-.1-.2-.6-1.5-.8-2-.2-.5-.4-.4-.7-.4h-.6c-.2 0-.5.1-.7.3-.7.6-1 1.5-.7 2.5.8 2.3 2.3 4.1 4.3 5.4 1.4.9 2.7 1.2 3.6 1.5.4.1.8.1 1.1.1.3 0 .9-.3 1-0.7.1-.4.1-.8.1-.8-.2-.1-.4-.2-.5-.3z"
+        fill="#25D366"
+      />
+    </svg>
   );
 }
