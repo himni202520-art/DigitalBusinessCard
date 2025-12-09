@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------
+   Color tokens + light/dark
+   ---------------------------
+   Keep these -- used across components
+*/
 @layer base {
   :root {
     --background: 240 20% 99%;
@@ -49,6 +54,7 @@
   }
 }
 
+/* keep existing global baseline rules */
 @layer base {
   * {
     @apply border-border;
@@ -56,21 +62,28 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: 'rlig' 1, 'calt' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    /* Safe area for mobile notches */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
+/* Components, utilities and helpers */
 @layer components {
   .gradient-bg {
     background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
   }
-  
+
   .gradient-text {
     background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-  
+
   /* SYNKA Premium Gradients */
   .synka-gradient {
     background: linear-gradient(135deg, #6A5AE0 0%, #7F3DFF 100%);
@@ -145,16 +158,33 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  
+
   .card-shadow {
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 
                 0 2px 4px -1px rgba(0, 0, 0, 0.06),
                 0 0 0 1px rgba(0, 0, 0, 0.05);
   }
-  
+
   .card-shadow-lg {
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
                 0 10px 10px -5px rgba(0, 0, 0, 0.04),
                 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+
+  /* Small helpers */
+  .container-max {
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .visually-hidden {
+    position: absolute !important;
+    height: 1px; width: 1px;
+    overflow: hidden;
+    clip: rect(1px, 1px, 1px, 1px);
+    white-space: nowrap;
   }
 }
